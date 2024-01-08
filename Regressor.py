@@ -426,6 +426,7 @@ feature_importance = np.concatenate(all_attributions, axis=0).mean(axis=0)
 
 
 
+# Test set evaluation
 final_model.eval()
 test_loss = 0.0
 all_test_predictions = []

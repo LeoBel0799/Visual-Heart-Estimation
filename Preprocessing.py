@@ -493,11 +493,11 @@ def merge_ecg_and_facial_features_landmarks(main_directory):
 
 
 main_directory = '/home/ubuntu/ecg-fitness_raw-v1.0'
-#process_ecg_data_all(main_directory)
-#delete_old_files(main_directory)
-#extract_facial_features_all(main_directory)
-#merge_ecg_and_facial_features_landmarks(main_directory)
-#merge_csv_files(main_directory, "dataset.csv")
+process_ecg_data_all(main_directory)
+delete_old_files(main_directory)
+extract_facial_features_all(main_directory)
+merge_ecg_and_facial_features_landmarks(main_directory)
+merge_csv_files(main_directory, "dataset.csv")
 
 
 csv_file = "/home/ubuntu/dataset.csv"  # Sostituisci con il percorso del tuo file CSV

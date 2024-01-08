@@ -212,7 +212,7 @@ def extract_face_region(image, landmarks):
         print("Region outside image limits.")
         return None
 
-def process_video(video_path, video_csv_path, face_detector):
+def process_video(video_path, video_csv_path, face_detector, landmark_predictor):
     try:
         cap = cv2.VideoCapture(video_path)
         if not cap.isOpened():
@@ -230,8 +230,8 @@ def process_video(video_path, video_csv_path, face_detector):
         # Calculate the total number of frames in the video
         total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
         frame_rate = cap.get(cv2.CAP_PROP_FPS)
-
-        max_time_to_analyze_seconds = 15  # Adjust the desired time duration in seconds
+        print(frame_rate)
+        max_time_to_analyze_seconds = 58  # Adjust the desired time duration in seconds
         max_frames_to_analyze = int(max_time_to_analyze_seconds * frame_rate)
         df = pd.read_csv(video_csv_path)
         df = df[df['milliseconds'] <= max_time_to_analyze_seconds * 1000]
@@ -245,7 +245,7 @@ def process_video(video_path, video_csv_path, face_detector):
 
             if not ret or frame_count >= max_frames_to_analyze:
                 break
-            frame = cv2.resize(frame, (300,200))
+            frame = cv2.resize(frame, (200,200))
             faces = face_detector(frame, 1)
 
             if faces:
@@ -276,10 +276,10 @@ def process_video(video_path, video_csv_path, face_detector):
 
 
 
-main_directory = "home/ubuntu/ecg-fitness_raw-v1.0"
+main_directory = "/home/ubuntu/data/ecg-fitness_raw-v1.0"
 main_directories = [d for d in os.listdir(main_directory) if os.path.isdir(os.path.join(main_directory, d))]
-face_detector = dlib.cnn_face_detection_model_v1("home/ubuntu/ecg-fitness_raw-v1.0/mmod_human_face_detector.dat")
-landmark_predictor = dlib.shape_predictor("home/ubuntu/ecg-fitness_raw-v1.0/shape_predictor_68_face_landmarks_GTX.dat")
+face_detector = dlib.cnn_face_detection_model_v1("/home/ubuntu/data/ecg-fitness_raw-v1.0/mmod_human_face_detector.dat")
+landmark_predictor = dlib.shape_predictor("/home/ubuntu/data/ecg-fitness_raw-v1.0/shape_predictor_68_face_landmarks_GTX.dat")
 processed_videos = 0
 all_datasets = []
 
@@ -293,11 +293,11 @@ for main_dir in main_directories:
         video_files = [f for f in os.listdir(sub_dir_path) if f.endswith("1.avi")]
 
         for video_file in video_files:
-            if processed_videos >=50:
+            if processed_videos >=95:
                break
             video_images = []
             video_path = os.path.join(sub_dir_path, video_file)
-            fin_csv_files = [f for f in os.listdir(sub_dir_path) if f.startswith("fin") and f.endswith(".csv")]
+            fin_csv_files = [f for f in os.listdir(sub_dir_path) if f.startswith("ecg") and f.endswith(".csv")]
 
             if len(fin_csv_files) == 1:
                 fin_csv_file = fin_csv_files[0]
@@ -306,7 +306,7 @@ for main_dir in main_directories:
                 print(f"Error: No or multiple 'fin' CSV files found in {sub_dir_path}")
                 continue
 
-            current_dataset = process_video(video_path,video_csv_path, face_detector)
+            current_dataset = process_video(video_path,video_csv_path, face_detector, landmark_predictor)
 
             if current_dataset is not None:
                 current_dataset_length = len(current_dataset)
@@ -324,7 +324,7 @@ print("Global custom dataset created with length: ",len(combined_dataset))
 all_data = []
 
 df = pd.DataFrame(all_data)
-df.to_csv('home/ubuntu/ecg-fitness_raw-v1.0/dataset-CNNRegMix.csv', index=False)
+df.to_csv('/home/ubuntu/ecg-fitness_raw-v1.0/dataset-CNNRegMix.csv', index=False)
 
 
 
@@ -351,7 +351,7 @@ print(f"Total number of samples in test_loader: {total_samples_in_test_loader}")
 
 
 # Assuming each video lasts for 8 seconds and you have FPS frames per second
-video_duration_seconds = 30
+video_duration_seconds = 58
 fps = 30  # Change this to your actual FPS
 # Assuming combined_dataset is an instance of ConcatDataset
 all_hr_values = []
@@ -377,7 +377,7 @@ plt.legend()
 plt.show()
 
 # Assuming each video lasts for 8 seconds and you have 30 frames per second
-video_duration_seconds = 30
+video_duration_seconds = 58
 fps = 30  # Change this to your actual FPS
 
 # Assuming combined_dataset is an instance of ConcatDataset
@@ -492,7 +492,7 @@ for epoch in range(num_epochs):
     mean_absolute_percentage_error = np.mean(np.abs(np.array(predictions) - np.array(targets_all)) / np.abs(np.array(targets_all)))
     me_rate_list.append(mean_absolute_percentage_error)
 
-    # Calcola Pearson's Correlation Coefficient (ρ)
+    # Calcola Pearson's Correlation Coefficient (?)
     mean_ground_truth = np.mean(np.array(targets_all))
     mean_predicted_hr = np.mean(np.array(predictions))
     numerator = np.sum((np.array(targets_all) - mean_ground_truth) * (np.array(predictions) - mean_predicted_hr))

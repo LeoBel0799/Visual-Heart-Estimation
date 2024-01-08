@@ -53,16 +53,19 @@ class CustomDataset(Dataset):
         self.df = dataframe
         self.transform = transform
 
+        # Utilizza direttamente il valore di 'ECG HR' senza calcolare la media dei gruppi
         self.mean_hr_mapping = {i: self.df.loc[i, ' ECG HR'] for i in range(len(self.df))}
         self.image_mapping = {i: img for i, img in enumerate(self.images_list)}
         shared_indices = set(self.mean_hr_mapping.keys()) & set(self.image_mapping.keys())
         shared_indices = sorted(shared_indices)
         self.shared_data = [(self.image_mapping[idx], self.mean_hr_mapping[idx]) for idx in shared_indices]
 
+        # Calcola il massimo e il minimo valore di HR per la normalizzazione
         self.max_hr = max(self.df[' ECG HR'])
         self.min_hr = min(self.df[' ECG HR'])
 
     def normalize_hr(self, hr):
+        # Normalizza HR tra 0 e 1 in base al massimo e al minimo valore di HR nel dataset
         return round((hr - self.min_hr) / (self.max_hr - self.min_hr), 3)
 
     def __len__(self):
@@ -80,11 +83,15 @@ class CustomDataset(Dataset):
 
 
 def extract_face_region(image, face_box):
+    # Extract face bounding box coordinates
     x, y, w, h = face_box.rect.left(), face_box.rect.top(), face_box.rect.width(), face_box.rect.height()
 
+    # Extract the face region
     face_region = image[y:y+h, x:x+w]
+    # Resize the face region to 256x192
     feature_image = cv2.resize(face_region, (192, 256))
 
+    # Transpose the image to have dimensions 3x256x192
     feature_image = np.transpose(feature_image, (2, 0, 1))
 
     return feature_image
@@ -100,6 +107,7 @@ def plot_predictions(targets, predictions, title):
 
 
 def process_video(video_path, video_csv_path, face_detector):
+    # Initialize video capture
     cap = cv2.VideoCapture(video_path)
     if not cap.isOpened():
         print(f"Error opening video file: {video_path}")
@@ -108,18 +116,24 @@ def process_video(video_path, video_csv_path, face_detector):
     rois_list = []
     resized_rois = []
 
+    # Read the first frame
     ret, frame = cap.read()
 
+    # List to save face regions frame by frame
     face_regions = []
 
+    # Calculate the total number of frames in the video
     total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
     frame_rate = cap.get(cv2.CAP_PROP_FPS)
 
+    # Limit the number of frames to analyze
     max_time_to_analyze_seconds = 20  # Adjust the desired time duration in seconds
     max_frames_to_analyze = int(max_time_to_analyze_seconds * frame_rate)
     df = pd.read_csv(video_csv_path)
+    # Filtra il DataFrame per ottenere solo le righe entro i primi 12 secondi
     df = df[df['milliseconds'] <= max_time_to_analyze_seconds * 1000]
     #print(df)
+    # Create a progress bar
     progress_bar = tqdm(total=min(total_frames, max_frames_to_analyze), position=0, leave=True,
                         desc=f'Processing Frames for {video_path}')
 
@@ -131,6 +145,7 @@ def process_video(video_path, video_csv_path, face_detector):
         if not ret or frame_count >= max_frames_to_analyze:
             break
 
+        # Detect faces in the frame
         faces = face_detector(frame, 1)
 
         if faces:
@@ -207,8 +222,10 @@ class CustomModel(nn.Module):
         x = self.dense(x)
 
         return x
+# Instantiate the model
 model = CustomModel()
 
+# Print the model architecture
 print(model)
 
 
@@ -266,26 +283,35 @@ test_size = len(combined_dataset) - train_size - val_size
 train_dataset, val_dataset, test_dataset = random_split(combined_dataset, [train_size, val_size, test_size])
 
 batch_size = 32
-train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
-val_loader= DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
-test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
+train_loader_F = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
+val_loader_F = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
+test_loader_F = DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
 
+# Definisci la tua funzione di perdita
 criterion = nn.MSELoss()
 
+# Definisci l'ottimizzatore
 optimizer = optim.Adam(model.parameters(), lr=1e-4)
 
+# Definisci il numero totale di epoche
 total_epochs = 30
 
+# Suddividi le epoche in base al tuo schema di tasso di apprendimento
 lr_schedule = {0: 1e-4, 10: 1e-5, 20: 1e-6}
+# Definisci il numero di epoche
 num_epochs = 20
 
+# Lista per memorizzare la perdita durante l'addestramento e la validazione
 train_loss_list = []
 val_loss_list = []
 rmse_list = []
 me_rate_list = []
 pearson_correlation_list = []
+# Modifica la definizione del tuo DataLoader per convertire i dati in float32
+train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
 
 for epoch in range(total_epochs):
+    # Cambia il tasso di apprendimento se necessario
     if epoch in lr_schedule:
         for param_group in optimizer.param_groups:
             param_group['lr'] = lr_schedule[epoch]
@@ -308,6 +334,7 @@ for epoch in range(total_epochs):
 
         train_loss += loss.item()
 
+    # Calcola la perdita media per epoca di addestramento
     avg_train_loss = train_loss / len(train_loader)
     train_loss_list.append(avg_train_loss)
 
@@ -318,6 +345,8 @@ for epoch in range(total_epochs):
     targets_all = []
     with torch.no_grad():
         for images, targets in tqdm(val_loader_F, desc='Validation'):
+            # Forward pass
+                        # Convert images to float
             images = images.to(dtype=torch.float32)
 
             # Forward pass
@@ -326,24 +355,31 @@ for epoch in range(total_epochs):
             val_loss += loss.item()
 
 
+            # Salva le previsioni e i target per il calcolo del RMSE
             predictions.extend(outputs.numpy())
             targets_all.extend(targets.numpy())
 
     #plot_predictions(targets_all, predictions, f'Validation - Predicted vs Ground Truth')
 
+    # Calcola la perdita media per epoca di validazione
     avg_val_loss = val_loss / len(val_loader_F)
     val_loss_list.append(avg_val_loss)
 
+    # Calcola il RMSE
     rmse = np.sqrt(((np.array(predictions) - np.array(targets_all))**2).mean())
     rmse_list.append(rmse)
 
+    # Calcola la media dell'errore di misura (Me)
     mean_error = np.mean(np.abs(np.array(predictions) - np.array(targets_all)))
 
+    # Calcola la deviazione standard dell'errore di misura (SDe)
     std_dev_error = np.sqrt(np.mean((np.array(predictions) - np.array(targets_all) - mean_error)**2))
 
+    # Calcola il Mean Absolute Percentage Error (MeRate)
     mean_absolute_percentage_error = np.mean(np.abs(np.array(predictions) - np.array(targets_all)) / np.abs(np.array(targets_all)))
     me_rate_list.append(mean_absolute_percentage_error)
 
+    # Calcola Pearson's Correlation Coefficient (ρ)
     mean_ground_truth = np.mean(np.array(targets_all))
     mean_predicted_hr = np.mean(np.array(predictions))
     numerator = np.sum((np.array(targets_all) - mean_ground_truth) * (np.array(predictions) - mean_predicted_hr))
@@ -352,10 +388,13 @@ for epoch in range(total_epochs):
     pearson_correlation = numerator / np.sqrt(denominator_ground_truth * denominator_predicted_hr)
     pearson_correlation_list.append(pearson_correlation)
 
+    # Stampa le perdite e le metriche per ogni epoca
     print(f'Epoch [{epoch + 1}/{num_epochs}], Train Loss: {avg_train_loss:.4f}, Val Loss: {avg_val_loss:.4f}, RMSE: {rmse:.4f}, MeRate: {mean_absolute_percentage_error:.4f}, Pearson Correlation: {pearson_correlation:.4f}')
 
 
 
+# DataLoader per il set di test
+test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
 
 # Test
 model.eval()
@@ -377,9 +416,11 @@ with torch.no_grad():
         test_predictions.extend(outputs.numpy())
         test_targets_all.extend(targets.numpy())
 
+# Calcola la perdita media per l'epoca di test
 avg_test_loss = test_loss / len(test_loader)
 print(f'Test Loss: {avg_test_loss:.4f}')
 
+# Calcola il RMSE
 rmse_test = np.sqrt(((np.array(test_predictions) - np.array(test_targets_all))**2).mean())
 print(f'Test RMSE: {rmse_test:.4f}')
 
@@ -408,6 +449,7 @@ plt.title('Test Set: Predicted vs Ground Truth Over Time')
 plt.show()
 
 torch.save(model, '/home/ubuntu/ecg-fitness_raw-v1.0/CNNRegressor.pth')
+# Plot delle perdite durante l'addestramento e la validazione
 plt.plot(train_loss_list, label='Train Loss')
 plt.plot(val_loss_list, label='Val Loss')
 plt.legend()
@@ -416,6 +458,7 @@ plt.ylabel('Loss')
 plt.title('Training and Validation Loss')
 plt.show()
 
+# Plot della RMSE
 plt.plot(rmse_list, label='RMSE')
 plt.legend()
 plt.xlabel('Epoch')
@@ -423,6 +466,7 @@ plt.ylabel('RMSE')
 plt.title('Root Mean Squared Error (RMSE) on Validation Set')
 plt.show()
 
+# Plot del Mean Absolute Percentage Error
 plt.plot(me_rate_list, label='Mean Absolute Percentage Error')
 plt.legend()
 plt.xlabel('Epoch')
@@ -430,6 +474,7 @@ plt.ylabel('Mean Absolute Percentage Error')
 plt.title('Mean Absolute Percentage Error on Validation Set')
 plt.show()
 
+# Plot di Pearson's Correlation Coefficient
 plt.plot(pearson_correlation_list, label="Pearson's Correlation Coefficient")
 plt.legend()
 plt.xlabel('Epoch')

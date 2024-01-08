@@ -16,6 +16,8 @@ import torchvision.transforms as transforms
 from torch.autograd import Variable
 from torch import nn
 import torch.nn.functional as F
+from torch.optim import AdamW
+
 import torch.optim as optim
 from torch.utils.data import Dataset, random_split, DataLoader, TensorDataset, ConcatDataset
 from sklearn.decomposition import FastICA, PCA
@@ -41,9 +43,6 @@ import numpy as np
 import matplotlib.pyplot as plt
 import torch
 
-
-"""# Implementazione del Paper EVM-CNN: Real-Time Contactless Heart Rate Estimation From Facial Video
-"""
 
 
 class SeparableConvBlock(nn.Module):
@@ -97,37 +96,29 @@ class CNNBody(nn.Module):
         x = self.fc2(x)
         return x
 
+# Instantiate the model
 model = CNNBody()
 
 class CustomDataset(Dataset):
-    def __init__(self, images_list, dataframe, transform=None):
+    def __init__(self, images_list, transform=None):
         self.images_list = images_list
-        self.df = dataframe
         self.transform = transform
 
-        self.mean_hr_mapping = {i: self.compute_group_mean(i) for i in range(len(self.df) // 31)}
-        self.image_mapping = {i: img for i, img in enumerate(self.images_list)}
-        shared_indices = set(self.mean_hr_mapping.keys()) & set(self.image_mapping.keys())
-        shared_indices = sorted(shared_indices)
-        self.shared_data = [(self.image_mapping[idx], self.mean_hr_mapping[idx]) for idx in shared_indices]
-
-        self.max_hr = max(self.df[' ECG HR'])
-        self.min_hr = min(self.df[' ECG HR'])
-
-    def compute_group_mean(self, group_idx):
-        start_idx = group_idx * 31
-        end_idx = min((group_idx + 1) * 31, len(self.df))
-        group_data = self.df.loc[start_idx:end_idx - 1, ' ECG HR']
-        return round(group_data.mean(), 3)
+        # Calcola il massimo e il minimo dell'HR dalla lista
+        self.max_hr = max(hr for _, hr in self.images_list)
+        self.min_hr = min(hr for _, hr in self.images_list)
 
     def normalize_hr(self, hr):
-        return round((hr - self.min_hr) / (self.max_hr - self.min_hr),3)
+        return round((hr - self.min_hr) / (self.max_hr - self.min_hr), 3)
+
+    def denormalize_hr(self, norm_hr):
+        return round(norm_hr * (self.max_hr - self.min_hr) + self.min_hr, 3)
 
     def __len__(self):
-        return len(self.shared_data)
+        return len(self.images_list)
 
     def __getitem__(self, idx):
-        img, mean_hr = self.shared_data[idx]
+        img, mean_hr = self.images_list[idx]
 
         if self.transform:
             img = self.transform(img)
@@ -152,16 +143,18 @@ def extract_face_region(image, landmarks):
     if 0 <= XLT < image.shape[1] and 0 <= YLT < image.shape[0] and 0 <= XLT + Wrect <= image.shape[1] and 0 <= YLT + Hrect <= image.shape[0]:
         face_region = cv2.getRectSubPix(image, size, center)
 
-        #rect = cv2.rectangle(image, (int(XLT), int(YLT)), (int(XLT + Wrect), int(YLT + Hrect)), (255, 0, 0), 2)
+        if len(face_region.shape) == 3:
+            feature_image = cv2.resize(face_region, (200, 200))
+            feature_image = np.transpose(feature_image, (2, 0, 1))
+        else:
+            feature_image = cv2.resize(face_region, (200, 200))
+            #feature_image_res = np.expand_dims(feature_image, axis=0)
 
-        # Aggiungi la regione di interesse alla lista
-        #rois.append(face_region)
-
-        # Ritorna la copia dell'immagine con il rettangolo disegnato (opzionale)
-        return face_region
+        return feature_image
     else:
         print("Region outside image limits.")
         return None
+
 
 
 
@@ -189,47 +182,96 @@ def apply_bandpass_filter(image, Fl, Fh):
 
     return Ni
 
+# def extract_features(video_frames, Pl, Fps, Fl, Fh):
+#     feature_images = []
+#
+#     while len(video_frames) >= Fps:
+#         # Process Fps frames
+#         intermediate_images = [
+#             reshape_to_one_column(gaussian_pyramid(frame, Pl))
+#             for frame in video_frames[:Fps]
+#         ]
+#         video_frames = video_frames[Fps:]
+#
+#         # Regola la dimensione lungo l'asse 0
+#         min_rows = min(img.shape[0] for img in intermediate_images)
+#         intermediate_images = [img[:min_rows, :] for img in intermediate_images]
+#
+#         # Concatenate columns
+#         C = np.concatenate(intermediate_images, axis=1)
+#
+#         while C.shape[1] >= Fps:
+#             # Applica il filtro passa-banda ed estrai le feature
+#             if C.shape[1] >= 3:
+#                 feature_image = apply_bandpass_filter(C[:, :Fps], Fl, Fh)
+#
+#                 # Rendi la feature image 25x25x3
+#                 feature_image = cv2.resize(feature_image, (25, 25))
+#                 #plt.imshow(feature_image)
+#                 #plt.show()
+#                 feature_image = np.expand_dims(feature_image, axis=-1)
+#                 feature_image = np.concatenate([feature_image] * 3, axis=-1)
+#
+#                 # PyTorch vuole il formato CHW, quindi permuta gli assi
+#                 feature_image = np.transpose(feature_image, (2, 0, 1))
+#
+#                 # Converti in tensore PyTorch
+#                 feature_image_tensor = torch.from_numpy(feature_image).float()
+#
+#
+#                 # Salva il tensore delle feature
+#                 feature_images.append(feature_image_tensor)
+#
+#             # Rimuovi le colonne elaborate
+#             C = C[:, Fps:]
+#
+#     return feature_images
+
+
 def extract_features(video_frames, Pl, Fps, Fl, Fh):
     feature_images = []
 
     while len(video_frames) >= Fps:
+        # Extract face regions and ECG values separately
+        face_regions, ecg_values = zip(*video_frames[:Fps])
+
+        # Process Fps face regions
         intermediate_images = [
-            reshape_to_one_column(gaussian_pyramid(frame, Pl))
-            for frame in video_frames[:Fps]
+            reshape_to_one_column(gaussian_pyramid(face_region, Pl))
+            for face_region in face_regions
         ]
         video_frames = video_frames[Fps:]
 
+        # Adjust dimensions along axis 0
         min_rows = min(img.shape[0] for img in intermediate_images)
         intermediate_images = [img[:min_rows, :] for img in intermediate_images]
 
+        # Concatenate columns
         C = np.concatenate(intermediate_images, axis=1)
 
         while C.shape[1] >= Fps:
-            # Filtro passa-banda ed estrai le feature
+            # Apply bandpass filter and extract features
             if C.shape[1] >= 3:
                 feature_image = apply_bandpass_filter(C[:, :Fps], Fl, Fh)
 
-                # Rendi la feature image 25x25x3
+                # Resize the feature image to 25x25x3
                 feature_image = cv2.resize(feature_image, (25, 25))
-                #plt.imshow(feature_image)
-                #plt.show()
                 feature_image = np.expand_dims(feature_image, axis=-1)
                 feature_image = np.concatenate([feature_image] * 3, axis=-1)
 
-                # PyTorch vuole il formato CHW, quindi vado a permutare gli assi
+                # PyTorch requires CHW format, so permute the axes
                 feature_image = np.transpose(feature_image, (2, 0, 1))
 
-                # Converto in tensore PyTorch
+                # Convert to PyTorch tensor
                 feature_image_tensor = torch.from_numpy(feature_image).float()
 
+                # Save the feature tensor along with the corresponding ECG value
+                feature_images.append((feature_image_tensor, ecg_values))
 
-                feature_images.append(feature_image_tensor)
-
-            # Elimino le colonne elaborate
+            # Remove processed columns
             C = C[:, Fps:]
 
     return feature_images
-
 
 Pl = 4
 Fps = 30
@@ -237,29 +279,40 @@ Fl = 0.75
 Fh = 4
 
 def process_video(video_path, video_csv_path, face_detector, landmark_predictor, tracker, Pl, Fps, Fl, Fh):
+    # Initialize video capture
     cap = cv2.VideoCapture(video_path)
     if not cap.isOpened():
         print(f"Error opening video file: {video_path}")
         return
-
     rois_list = []
-    resized_rois = []
+    # rois_list = []
+    # resized_rois = []
+    #
+    # # Read the first frame
+    # ret, frame = cap.read()
+    #
+    # # List to save face regions frame by frame
+    # face_regions = []
+    # Load ECG data
+    ecg_data = pd.read_csv(video_csv_path, index_col='milliseconds')
+    ecg_timestamps = ecg_data.index
 
-    ret, frame = cap.read()
-
-    face_regions = []
-
+    # Calculate the total number of frames in the video
     total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
     frame_rate = cap.get(cv2.CAP_PROP_FPS)
 
-    max_time_to_analyze_seconds = 15  # Adjust the desired time duration in seconds
+    # Limit the number of frames to analyze
+    max_time_to_analyze_seconds = 58  # Adjust the desired time duration in seconds
     max_frames_to_analyze = int(max_time_to_analyze_seconds * frame_rate)
     df = pd.read_csv(video_csv_path)
+    # Filtra il DataFrame per ottenere solo le righe entro i primi tot secondi
     df = df[df['milliseconds'] <= max_time_to_analyze_seconds * 1000]
+    # Create a progress bar
     progress_bar = tqdm(total=min(total_frames, max_frames_to_analyze), position=0, leave=True,
                         desc=f'Processing Frames for {video_path}')
 
     frame_count = 0
+    video_images = []
 
     while True:
         ret, frame = cap.read()
@@ -267,23 +320,32 @@ def process_video(video_path, video_csv_path, face_detector, landmark_predictor,
         if not ret or frame_count >= max_frames_to_analyze:
             break
 
-        frame = cv2.resize(frame, (640, 480))
-
         faces = face_detector(frame, 1)
 
-        if faces and tracker:
-            face = faces[0]
-            landmarks = landmark_predictor(frame, face.rect)
+        if not faces:
+            frame_count += 1
+            continue
 
-            face_region = extract_face_region(frame, landmarks)
-            if face_region is not None:
-                rois_list.append(face_region)
+        face = faces[0]
+        landmarks = landmark_predictor(frame, face.rect)
 
-            max_width = max(roi.shape[1] for roi in rois_list)
-            max_height = max(roi.shape[0] for roi in rois_list)
+        face_region = extract_face_region(frame, landmarks)
+        if face_region is not None:
+            video_frame_timestamp = frame_count * (1000 / frame_rate)
+            closest_timestamp = min(ecg_timestamps, key=lambda x: abs(x - video_frame_timestamp))
 
-            # Vado a fare il resize di tutte le ROI trovate in contemporanea
-            resized_rois = [cv2.resize(roi, (max_width, max_height)) for roi in rois_list]
+            # Find the ECG value using direct access to the DataFrame
+            ecg_value = ecg_data.at[closest_timestamp, " ECG HR"]
+
+            # Add the face region and associated ECG value to the list
+            rois_list.append((face_region, ecg_value))
+
+            # Find maximum dimensions
+            #max_width = max(roi.shape[1] for roi in rois_list)
+            #max_height = max(roi.shape[0] for roi in rois_list)
+
+            # Resize all ROIs simultaneously
+            #resized_rois = [cv2.resize(roi, (max_width, max_height)) for roi in rois_list]
 
             bbox = (face.rect.left(), face.rect.top(), face.rect.width(), face.rect.height())
             tracker.init(frame, bbox)
@@ -291,20 +353,20 @@ def process_video(video_path, video_csv_path, face_detector, landmark_predictor,
         if faces and tracker:
             ret, bbox = tracker.update(frame)
 
-            if ret:
-                bbox = tuple(map(int, bbox))
-
-                if 0 <= bbox[0] < frame.shape[1] and 0 <= bbox[1] < frame.shape[0] and \
-                   0 <= bbox[0] + bbox[2] < frame.shape[1] and 0 <= bbox[1] + bbox[3] < frame.shape[0]:
-                    p1 = (bbox[0], bbox[1])
-                    p2 = (bbox[0] + bbox[2], bbox[1] + bbox[3])
-
-                    cv2.rectangle(frame, p1, p2, (0, 255, 0), 2)
-
-        cv2.rectangle(frame, (bbox[0], bbox[1]), (bbox[0] + bbox[2], bbox[1] + bbox[3]), (0, 255, 0), 2)
-
-        for i in range(68):
-            cv2.circle(frame, (landmarks.part(i).x, landmarks.part(i).y), 2, (0, 255, 255), -1)
+        #     if ret:
+        #         bbox = tuple(map(int, bbox))
+        #
+        #         if 0 <= bbox[0] < frame.shape[1] and 0 <= bbox[1] < frame.shape[0] and \
+        #            0 <= bbox[0] + bbox[2] < frame.shape[1] and 0 <= bbox[1] + bbox[3] < frame.shape[0]:
+        #             p1 = (bbox[0], bbox[1])
+        #             p2 = (bbox[0] + bbox[2], bbox[1] + bbox[3])
+        #
+        #             cv2.rectangle(frame, p1, p2, (0, 255, 0), 2)
+        #
+        # cv2.rectangle(frame, (bbox[0], bbox[1]), (bbox[0] + bbox[2], bbox[1] + bbox[3]), (0, 255, 0), 2)
+        #
+        # for i in range(68):
+        #     cv2.circle(frame, (landmarks.part(i).x, landmarks.part(i).y), 2, (0, 255, 255), -1)
 
         progress_bar.update(1)
         frame_count += 1
@@ -313,113 +375,135 @@ def process_video(video_path, video_csv_path, face_detector, landmark_predictor,
 
     print(f"Video analyzed for {video_path}")
 
-    max_width = max(roi.shape[1] for roi in rois_list)
-    max_height = max(roi.shape[0] for roi in rois_list)
+    #max_width = max(roi.shape[1] for roi in rois_list)
+    #max_height = max(roi.shape[0] for roi in rois_list)
 
-    resized_rois = [cv2.resize(roi, (max_width, max_height)) for roi in rois_list]
+    #resized_rois = [cv2.resize(roi, (max_width, max_height)) for roi in rois_list]
 
-    features_img = extract_features(resized_rois, Pl, Fps, Fl, Fh)
+    features_img = extract_features(rois_list, Pl, Fps, Fl, Fh)
 
     video_images.extend(features_img)
 
     print(f"Features extracted for {video_path}")
 
-    current_dataset = CustomDataset(video_images, df)
+    current_dataset = CustomDataset(video_images)
     return current_dataset
 
 
+def process_and_create_dataset (main_directory, video_to_process):
+    main_directories = [d for d in os.listdir(main_directory) if os.path.isdir(os.path.join(main_directory, d))]
+    face_detector = dlib.cnn_face_detection_model_v1("/home/ubuntu/data/ecg-fitness_raw-v1.0/mmod_human_face_detector.dat")
+    landmark_predictor = dlib.shape_predictor(
+        "/home/ubuntu/data/ecg-fitness_raw-v1.0/shape_predictor_68_face_landmarks_GTX.dat")
+    tracker = cv2.TrackerCSRT_create()
+    processed_videos = 0
+    all_datasets = []
 
-main_directory = "home/ubuntu/ecg-fitness_raw-v1.0"
-main_directories = [d for d in os.listdir(main_directory) if os.path.isdir(os.path.join(main_directory, d))]
-face_detector = dlib.cnn_face_detection_model_v1("home/ubuntu/ecg-fitness_raw-v1.0/mmod_human_face_detector.dat")
-landmark_predictor = dlib.shape_predictor("home/ubuntu/ecg-fitness_raw-v1.0/shape_predictor_68_face_landmarks_GTX.dat")
-tracker = cv2.TrackerCSRT_create()
-processed_videos = 0
-all_datasets = []
+    for main_dir in main_directories:
+        main_dir_path = os.path.join(main_directory, main_dir)
 
-for main_dir in main_directories:
-    main_dir_path = os.path.join(main_directory, main_dir)
+        subdirectories = [d for d in os.listdir(main_dir_path) if os.path.isdir(os.path.join(main_dir_path, d))]
+        for sub_dir in subdirectories:
+            sub_dir_path = os.path.join(main_dir_path, sub_dir)
 
-    subdirectories = [d for d in os.listdir(main_dir_path) if os.path.isdir(os.path.join(main_dir_path, d))]
-    for sub_dir in subdirectories:
-        sub_dir_path = os.path.join(main_dir_path, sub_dir)
+            video_files = [f for f in os.listdir(sub_dir_path) if f.endswith("1.avi")]
 
-        video_files = [f for f in os.listdir(sub_dir_path) if f.endswith("1.avi")]
+            for video_file in video_files:
+                if processed_videos >= video_to_process:
+                   break
+                video_images = []
+                video_path = os.path.join(sub_dir_path, video_file)
+                fin_csv_files = [f for f in os.listdir(sub_dir_path) if f.startswith("ecg") and f.endswith(".csv")]
 
-        for video_file in video_files:
-            if processed_videos >= 30:
-               break
-            video_images = []
-            video_path = os.path.join(sub_dir_path, video_file)
-            fin_csv_files = [f for f in os.listdir(sub_dir_path) if f.startswith("fin") and f.endswith(".csv")]
+                if len(fin_csv_files) == 1:
+                    fin_csv_file = fin_csv_files[0]
+                    video_csv_path = os.path.join(sub_dir_path, fin_csv_file)
+                else:
+                    print(f"Error: No or multiple 'fin' CSV files found in {sub_dir_path}")
+                    continue
 
-            if len(fin_csv_files) == 1:
-                fin_csv_file = fin_csv_files[0]
-                video_csv_path = os.path.join(sub_dir_path, fin_csv_file)
-            else:
-                print(f"Error: No or multiple 'fin' CSV files found in {sub_dir_path}")
-                continue
+                current_dataset = process_video(video_path,video_csv_path, face_detector,landmark_predictor,tracker, Pl, Fps, Fl, Fh)
 
-            current_dataset = process_video(video_path,video_csv_path, face_detector,landmark_predictor,tracker, Pl, Fps, Fl, Fh)
+                if current_dataset is not None:
+                    current_dataset_length = len(current_dataset)
+                    all_datasets.append(current_dataset)
+                    print(f"All datasets len: {len(all_datasets)}")
+                    print(f"CustomDataset created for {video_path} with {current_dataset_length} rows")
+                    processed_videos += 1
+                else:
+                    print(f"Skipping video {video_path} due to processing error.")
 
-            #print(len(current_dataset))
-            current_dataset_length = len(current_dataset)
-            all_datasets.append(current_dataset)
-            print(f"All datasets len: {len(all_datasets)}")
-            print(f"CustomDataset created for {video_path} with {current_dataset_length} rows")
-            processed_videos += 1
-        #cap.release()
+    combined_dataset = ConcatDataset(all_datasets)
 
-combined_dataset = ConcatDataset(all_datasets)
+    print("Global custom dataset created with length: ", len(combined_dataset))
 
-print("Global custom dataset created with length: ",len(combined_dataset))
-all_data = []
-
-df = pd.DataFrame(all_data)
-df.to_csv('home/ubuntu/ecg-fitness_raw-v1.0/dataset-EVMCNN.csv', index=False)
-
-
-train_size = int(0.8 * len(combined_dataset))
-val_size = int(0.1 * len(combined_dataset))
-test_size = len(combined_dataset) - train_size - val_size
-
-train_dataset, val_dataset, test_dataset = random_split(combined_dataset, [train_size, val_size, test_size])
-
-batch_size = 32
-train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
-val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
-test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
-
-def plot_predictions(targets, predictions, title):
-    plt.figure(figsize=(10, 6))
-    plt.scatter(targets, predictions, alpha=0.5)
-    plt.plot([min(targets), max(targets)], [min(targets), max(targets)], '--', color='red', linewidth=2)
-    plt.title(title)
-    plt.xlabel('Ground Truth')
-    plt.ylabel('Predicted')
-    plt.show()
+    return combined_dataset
 
 
+main_directory = "/home/ubuntu/data/ecg-fitness_raw-v1.0"
+video_to_process = 80
+dataset_path = "/home/ubuntu/data/ecg-fitness_raw-v1.0/dlib/combined_dataset_EVMCNN.pth"
+final_dataset = process_and_create_dataset(main_directory,video_to_process)
+torch.save(final_dataset, dataset_path)
+print("Global custom dataset saved!")
+loaded_dataset = torch.load(dataset_path)
+print("Global custom dataset loaded...!")
 
+
+train_size = int(0.8 * len(loaded_dataset))
+val_size = int(0.1 * len(loaded_dataset))
+test_size = len(loaded_dataset) - train_size - val_size
+
+train_dataset, val_dataset, test_dataset = random_split(loaded_dataset, [train_size, val_size, test_size])
+
+batch_size = 64
+train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, pin_memory=True)
+val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False, pin_memory=True)
+test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False, pin_memory=True)
+
+# def plot_predictions(targets, predictions, title):
+#     plt.figure(figsize=(10, 6))
+#     plt.scatter(targets, predictions, alpha=0.5)
+#     plt.plot([min(targets), max(targets)], [min(targets), max(targets)], '--', color='red', linewidth=2)
+#     plt.title(title)
+#     plt.xlabel('Ground Truth')
+#     plt.ylabel('Predicted')
+#     plt.show()
+
+
+
+# Definisci la tua funzione di perdita
 criterion = nn.MSELoss()
 
+# Definisci l'ottimizzatore
 optimizer = optim.Adam(model.parameters(), lr=0.001)
 
-num_epochs = 20
+# Definisci il numero di epoche
+num_epochs = 150
+# Creazione del modello
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+print(
+    "Using device: ",
+    device,
+    f"({torch.cuda.get_device_name(device)})" if torch.cuda.is_available() else "",
+)
 
+# Lista per memorizzare la perdita durante l'addestramento e la validazione
 train_loss_list = []
 val_loss_list = []
 rmse_list = []
 me_rate_list = []
 pearson_correlation_list = []
+# Modifica la definizione del tuo DataLoader per convertire i dati in float32
 
 for epoch in range(num_epochs):
     # Addestramento
     model.train()
     train_loss = 0.0
     for images, targets in tqdm(train_loader, desc=f'Epoch {epoch + 1}/{num_epochs}'):
-        images = images.float()
-        targets = targets.float()
+        # Converti i dati in float32
+        images = images.float().cuda()
+        targets = targets.float().cuda()
 
         # Forward pass
         outputs = model(images)
@@ -432,6 +516,7 @@ for epoch in range(num_epochs):
 
         train_loss += loss.item()
 
+    # Calcola la perdita media per epoca di addestramento
     avg_train_loss = train_loss / len(train_loader)
     train_loss_list.append(avg_train_loss)
 
@@ -443,6 +528,8 @@ for epoch in range(num_epochs):
     with torch.no_grad():
         for images, targets in tqdm(val_loader, desc='Validation'):
             # Forward pass
+            images = images.float().cuda()
+            targets = targets.float().cuda()
             outputs = model(images)
             loss = criterion(outputs, targets)
             val_loss += loss.item()
@@ -451,26 +538,27 @@ for epoch in range(num_epochs):
             predictions.extend(outputs.numpy())
             targets_all.extend(targets.numpy())
 
-    plot_predictions(targets_all, predictions, f'Validation - Predicted vs Ground Truth')
+    #plot_predictions(targets_all, predictions, f'Validation - Predicted vs Ground Truth')
 
+    # Calcola la perdita media per epoca di validazione
     avg_val_loss = val_loss / len(val_loader)
     val_loss_list.append(avg_val_loss)
 
-    #  RMSE
+    # Calcola il RMSE
     rmse = np.sqrt(((np.array(predictions) - np.array(targets_all))**2).mean())
     rmse_list.append(rmse)
 
-    # Media dell'errore di misura (Me)
+    # Calcola la media dell'errore di misura (Me)
     mean_error = np.mean(np.abs(np.array(predictions) - np.array(targets_all)))
 
-    # Deviazione standard dell'errore di misura (SDe)
+    # Calcola la deviazione standard dell'errore di misura (SDe)
     std_dev_error = np.sqrt(np.mean((np.array(predictions) - np.array(targets_all) - mean_error)**2))
 
-    # Mean Absolute Percentage Error (MeRate)
+    # Calcola il Mean Absolute Percentage Error (MeRate)
     mean_absolute_percentage_error = np.mean(np.abs(np.array(predictions) - np.array(targets_all)) / np.abs(np.array(targets_all)))
     me_rate_list.append(mean_absolute_percentage_error)
 
-    # Pearson's Correlation Coefficient (ρ)
+    # Calcola Pearson's Correlation Coefficient (ρ)
     mean_ground_truth = np.mean(np.array(targets_all))
     mean_predicted_hr = np.mean(np.array(predictions))
     numerator = np.sum((np.array(targets_all) - mean_ground_truth) * (np.array(predictions) - mean_predicted_hr))
@@ -479,6 +567,7 @@ for epoch in range(num_epochs):
     pearson_correlation = numerator / np.sqrt(denominator_ground_truth * denominator_predicted_hr)
     pearson_correlation_list.append(pearson_correlation)
 
+    # Stampa le perdite e le metriche per ogni epoca
     print(f'Epoch [{epoch + 1}/{num_epochs}], Train Loss: {avg_train_loss:.4f}, Val Loss: {avg_val_loss:.4f}, RMSE: {rmse:.4f}, MeRate: {mean_absolute_percentage_error:.4f}, Pearson Correlation: {pearson_correlation:.4f}')
 
     # Testing
@@ -486,9 +575,12 @@ for epoch in range(num_epochs):
     test_loss = 0.0
     predictions_test = []
     targets_all_test = []
+    test_loss_list = []
     with torch.no_grad():
         for images, targets in tqdm(test_loader, desc='Testing'):
             # Forward pass
+            images = images.float().cuda()
+            targets = targets.float().cuda()
             outputs = model(images)
             loss = criterion(outputs, targets)
             test_loss += loss.item()
@@ -497,9 +589,11 @@ for epoch in range(num_epochs):
             predictions_test.extend(outputs.numpy())
             targets_all_test.extend(targets.numpy())
 
+    # Calculate average test loss
     avg_test_loss = test_loss / len(test_loader)
     test_loss_list.append(avg_test_loss)
 
+    # Calculate metrics for the test phase
     rmse_test = np.sqrt(((np.array(predictions_test) - np.array(targets_all_test))**2).mean())
     me_test = np.mean(np.abs(np.array(predictions_test) - np.array(targets_all_test)))
     sde_test = np.sqrt(np.mean((np.array(predictions_test) - np.array(targets_all_test) - me_test)**2))
@@ -512,40 +606,43 @@ for epoch in range(num_epochs):
 torch.save(model, 'home/ubuntu/ecg-fitness_raw-v1.0/EVM-CNNRegressor.pth')# Plot delle perdite durante l'addestramento e la validazione
 
 
-plt.plot(targets_all_test, label='Ground Truth')
-plt.plot(predictions_test, label='Predicted')
-plt.xlabel('Sample Index')
-plt.ylabel('Value')
-plt.legend()
-plt.title('Test Set: Predicted vs Ground Truth Over Time')
-plt.show()
-
-
-plt.plot(train_loss_list, label='Train Loss')
-plt.plot(val_loss_list, label='Val Loss')
-plt.legend()
-plt.xlabel('Epoch')
-plt.ylabel('Loss')
-plt.title('Training and Validation Loss')
-plt.show()
-
-plt.plot(rmse_list, label='RMSE')
-plt.legend()
-plt.xlabel('Epoch')
-plt.ylabel('RMSE')
-plt.title('Root Mean Squared Error (RMSE) on Validation Set')
-plt.show()
-
-plt.plot(me_rate_list, label='Mean Absolute Percentage Error')
-plt.legend()
-plt.xlabel('Epoch')
-plt.ylabel('Mean Absolute Percentage Error')
-plt.title('Mean Absolute Percentage Error on Validation Set')
-plt.show()
-
-plt.plot(pearson_correlation_list, label="Pearson's Correlation Coefficient")
-plt.legend()
-plt.xlabel('Epoch')
-plt.ylabel("Pearson's Correlation Coefficient")
-plt.title("Pearson's Correlation Coefficient on Validation Set")
-plt.show()
+# plt.plot(targets_all_test, label='Ground Truth')
+# plt.plot(predictions_test, label='Predicted')
+# plt.xlabel('Sample Index')
+# plt.ylabel('Value')
+# plt.legend()
+# plt.title('Test Set: Predicted vs Ground Truth Over Time')
+# plt.show()
+#
+#
+# plt.plot(train_loss_list, label='Train Loss')
+# plt.plot(val_loss_list, label='Val Loss')
+# plt.legend()
+# plt.xlabel('Epoch')
+# plt.ylabel('Loss')
+# plt.title('Training and Validation Loss')
+# plt.show()
+#
+# # Plot della RMSE
+# plt.plot(rmse_list, label='RMSE')
+# plt.legend()
+# plt.xlabel('Epoch')
+# plt.ylabel('RMSE')
+# plt.title('Root Mean Squared Error (RMSE) on Validation Set')
+# plt.show()
+#
+# # Plot del Mean Absolute Percentage Error
+# plt.plot(me_rate_list, label='Mean Absolute Percentage Error')
+# plt.legend()
+# plt.xlabel('Epoch')
+# plt.ylabel('Mean Absolute Percentage Error')
+# plt.title('Mean Absolute Percentage Error on Validation Set')
+# plt.show()
+#
+# # Plot di Pearson's Correlation Coefficient
+# plt.plot(pearson_correlation_list, label="Pearson's Correlation Coefficient")
+# plt.legend()
+# plt.xlabel('Epoch')
+# plt.ylabel("Pearson's Correlation Coefficient")
+# plt.title("Pearson's Correlation Coefficient on Validation Set")
+# plt.show()
