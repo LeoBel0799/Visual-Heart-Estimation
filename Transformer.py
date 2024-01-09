@@ -185,7 +185,6 @@ class CustomDataset(Dataset):
         self.images_list = images_list
         self.transform = transform
 
-        # Calcola il massimo e il minimo dell'HR dalla lista
         self.max_hr = max(hr for _, hr in self.images_list)
         self.min_hr = min(hr for _, hr in self.images_list)
 
@@ -269,7 +268,6 @@ def process_video(video_path, video_csv_path, face_detector, landmark_predictor)
             if not ret or frame_count >= max_frames_to_analyze:
                 break
 
-            # Convert frame to grayscale
             gray_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
 
             gray_frame = cv2.resize(gray_frame, (300, 300))
@@ -279,7 +277,6 @@ def process_video(video_path, video_csv_path, face_detector, landmark_predictor)
                 frame_count += 1
                 continue
 
-            # Use only the first detected face
             face = faces[0]
             landmarks = landmark_predictor(gray_frame, face.rect)
 
@@ -288,10 +285,8 @@ def process_video(video_path, video_csv_path, face_detector, landmark_predictor)
                 video_frame_timestamp = frame_count * (1000 / frame_rate)
                 closest_timestamp = min(ecg_timestamps, key=lambda x: abs(x - video_frame_timestamp))
 
-                # Find the ECG value using direct access to the DataFrame
                 ecg_value = ecg_data.at[closest_timestamp, " ECG HR"]
 
-                # Add the face region and associated ECG value to the list
                 rois_list.append((face_region, ecg_value))
 
             progress_bar.update(1)
@@ -330,7 +325,6 @@ def process_and_create_dataset (main_directory, video_to_process):
             for video_file in video_files:
                 if processed_videos >= video_to_process:
                     break
-                video_images = []
                 video_path = os.path.join(sub_dir_path, video_file)
                 fin_csv_files = [f for f in os.listdir(sub_dir_path) if f.startswith("ecg") and f.endswith(".csv")]
 
@@ -358,11 +352,11 @@ def process_and_create_dataset (main_directory, video_to_process):
     return combined_dataset
 
 main_directory = "/home/ubuntu/data/ecg-fitness_raw-v1.0"
-video_to_process = 70
+#video_to_process = 70
 dataset_path = "/home/ubuntu/data/ecg-fitness_raw-v1.0/dlib/combined_dataset.pth"
-final_dataset = process_and_create_dataset(main_directory,video_to_process)
-torch.save(final_dataset, dataset_path)
-print("Global custom dataset saved!")
+#final_dataset = process_and_create_dataset(main_directory,video_to_process)
+#torch.save(final_dataset, dataset_path)
+#print("Global custom dataset saved!")
 loaded_dataset = torch.load(dataset_path)
 print("Global custom dataset loaded...!")
 
@@ -402,10 +396,10 @@ print(f"Total number of samples in test_loader: {total_samples_in_test_loader}")
 #     # Interrompi il ciclo dopo la prima iterazione (se vuoi vedere solo il primo batch)
 #     break
 
-N_EPOCHS = 150
+N_EPOCHS = 50
 LR = 0.001
-VAL_EVERY = 2  # Valuta ogni N epoche
-PATIENCE = 5  # Numero massimo di epoche senza miglioramenti prima di fermarsi
+VAL_EVERY = 2
+PATIENCE = 5
 WD = 0.01
 
 # Creazione del modello
@@ -418,24 +412,21 @@ print(
 
 criterion = nn.MSELoss()
 
-def objective(trial, train_loader):
-    # Definisci gli hyperparameters suggeriti da Optuna
+def objective(trial, train_loader, test_loader):
     patch_size = trial.suggest_int('patch_size', 4, 8)
     emb_dim = trial.suggest_int('emb_dim', 16, 128)
     n_layers = trial.suggest_int('n_layers', 4, 12)
     dropout = trial.suggest_float('dropout', 0.0, 0.5)
     heads = trial.suggest_int('heads', 1, 3)
+    emb_dim = emb_dim + (heads - emb_dim % heads) % heads
 
-    # Crea il modello con gli hyperparameters suggeriti
     model = ViT(patch_size=patch_size, emb_dim=emb_dim, n_layers=n_layers, dropout=dropout, heads=heads)
     model.to(device)
 
     optimizer = AdamW(model.parameters(), lr=LR, weight_decay=WD)
-    # Definisci l'ottimizzatore e la loss function
-    optimizer = AdamW(model.parameters(), lr=0.001)
     criterion = nn.MSELoss()
 
-    # Addestra il modello per un numero fisso di epoche
+
     N_EPOCHS = 8
     for epoch in range(N_EPOCHS):
         model.train()
@@ -464,10 +455,111 @@ def objective(trial, train_loader):
         train_loss /= len(train_loader.dataset)
         print(f"Epoch {epoch + 1}/{N_EPOCHS}, Train RMSE: {math.sqrt(train_loss):.4f}")
 
-    return math.sqrt(train_loss)  # Restituisci il RMSE come metrica di valutazione
+        model.eval()
+        test_loss = 0.0
+
+        with torch.no_grad():
+            for test_batch in tqdm(test_loader, desc=f"Epoch {epoch + 1}/{N_EPOCHS} in validation", leave=True):
+                val_images, val_targets = test_batch
+
+                for val_image, val_target in zip(val_images, val_targets):
+                    val_image = val_image.float().cuda()
+                    val_target = val_target.float().cuda()
+                    val_image = val_image.unsqueeze(0)
+                    val_target = val_target.unsqueeze(0)
+                    val_image = val_image.unsqueeze(0)
+
+                    val_outputs = model(val_image)
+                    test_loss += criterion(val_outputs, val_target).item()
+
+        test_loss /= len(val_loader.dataset)
+        print(f"Epoch {epoch + 1}/{N_EPOCHS}, Test RMSE: {math.sqrt(test_loss):.4f}")
+
+    return math.sqrt(test_loss)
+
+
+# def objective(trial, train_loader, test_loader):
+#     # Definisci gli hyperparameters suggeriti da Optuna
+#     patch_size = trial.suggest_int('patch_size', 4, 8)
+#     emb_dim = trial.suggest_int('emb_dim', 16, 128)
+#     n_layers = trial.suggest_int('n_layers', 4, 12)
+#     dropout = trial.suggest_float('dropout', 0.0, 0.5)
+#     heads = trial.suggest_int('heads', 1, 3)
+#     emb_dim = emb_dim + (heads - emb_dim % heads) % heads
+#
+#     # Crea il modello con gli hyperparameters suggeriti
+#     model = ViT(patch_size=patch_size, emb_dim=emb_dim, n_layers=n_layers, dropout=dropout, heads=heads)
+#     model.to(device)
+#
+#     optimizer = AdamW(model.parameters(), lr=LR, weight_decay=WD)
+#     criterion = nn.MSELoss()
+#
+#     # Addestra il modello per un numero fisso di epoche
+#     N_EPOCHS = 8
+#     for epoch in range(N_EPOCHS):
+#         model.train()
+#         train_loss = 0.0
+#
+#         for batch in tqdm(train_loader, desc=f"Epoch {epoch + 1}/{N_EPOCHS} in training", leave=True):
+#             images, targets = batch
+#
+#             for image, target in zip(images, targets):
+#                 # Trasferisci l'immagine e il target sulla GPU
+#                 image = image.float().cuda()
+#                 target = target.float().cuda()
+#                 image = image.unsqueeze(0)
+#                 target = target.unsqueeze(0)
+#                 image = image.unsqueeze(0)
+#
+#                 outputs = model(image)
+#                 loss = criterion(outputs, target)
+#                 optimizer.zero_grad()
+#                 loss.backward()
+#                 optimizer.step()
+#
+#             train_loss += loss.item()
+#
+#         train_loss /= len(train_loader.dataset)
+#         print(f"Epoch {epoch + 1}/{N_EPOCHS}, Train RMSE: {math.sqrt(train_loss):.4f}")
+#
+#         # Test the model after each epoch
+#         model.eval()
+#         test_loss = 0.0
+#
+#         with torch.no_grad():
+#             for batch in tqdm(test_loader, desc=f"Epoch {epoch + 1}/{N_EPOCHS} in testing", leave=True):
+#                 images, targets = batch
+#
+#                 for image, target in zip(images, targets):
+#                     # Trasferisci l'immagine e il target sulla GPU
+#                     image = image.float().cuda()
+#                     target = target.float().cuda()
+#                     image = image.unsqueeze(0)
+#                     target = target.unsqueeze(0)
+#                     image = image.unsqueeze(0)
+#                     # Forward pass
+#                     outputs = model(image)
+#                     loss = criterion(outputs, targets)
+#                 test_loss += loss.item()
+#
+#                 # Print 5 real and predicted values during testing
+#                 # Print 5 real and predicted values during testing
+#                 if len(test_loader) == 5:
+#                     print("Testing - Epoch {}, Real vs Predicted:".format(epoch + 1))
+#                     for i in range(5):
+#                         real_value = CustomDataset.denormalize_hr(target[i].item())
+#                         predicted_value = CustomDataset.denormalize_hr(outputs[i].item())
+#
+#                         print("Real: {:.4f}\tPredicted: {:.4f}".format(real_value, predicted_value))
+#
+#         test_loss /= len(test_loader.dataset)
+#         print(f"Epoch {epoch + 1}/{N_EPOCHS}, Test RMSE: {math.sqrt(test_loss):.4f}")
+#
+#     return math.sqrt(test_loss)  # Restituisci il RMSE come metrica di valutazione
+
 
 study = optuna.create_study(direction='minimize')
-study.optimize(lambda trial: objective(trial, train_loader), n_trials=15)
+study.optimize(lambda trial: objective(trial, train_loader, test_loader), n_trials=3)
 
 best_params = study.best_params
 print("Best Hyperparameters:", best_params)
@@ -485,7 +577,6 @@ best_model.to(device)
 
 optimizer = AdamW(best_model.parameters(), lr=LR, weight_decay=WD)
 
-# Inizializzazione per early stopping
 best_val_rmse = float('inf')
 no_improvement_count = 0
 train_loss_list = []
@@ -494,7 +585,6 @@ rmse_list = []
 me_rate_list = []
 pearson_correlation_list = []
 
-# Training loop
 for epoch in range(N_EPOCHS):
     best_model.train()
     train_loss = 0.0
@@ -503,7 +593,6 @@ for epoch in range(N_EPOCHS):
         images, targets = batch
 
         for image, target in zip(images, targets):
-            # Trasferisci l'immagine e il target sulla GPU
             image = image.float().cuda()
             target = target.float().cuda()
             image = image.unsqueeze(0)
@@ -547,16 +636,9 @@ for epoch in range(N_EPOCHS):
                     target = target.unsqueeze(0)
                     image = image.unsqueeze(0)
 
-                    # Forward pass
                     outputs = best_model(image)
-
-                    # Transfer outputs to CPU for MSE loss calculation
                     outputs = outputs.cpu()
-
-                    # Transfer target to CPU for MSE loss calculation
                     target = target.cpu()
-
-                    # Calculate MSE loss
                     loss = criterion(outputs, target)
                     val_loss += loss.item()
 
@@ -578,7 +660,6 @@ for epoch in range(N_EPOCHS):
                 print(f"No improvement for {PATIENCE} epochs. Early stopping.")
                 break
 
-        # Calcola la perdita media per epoca di validazione
         avg_val_loss = val_loss / len(val_loader)
         val_loss_list.append(avg_val_loss)
 
@@ -592,12 +673,12 @@ for epoch in range(N_EPOCHS):
         # Deviazione standard dell'errore di misura (SDe)
         std_dev_error = np.sqrt(np.mean((np.array(predictions) - np.array(targets_all) - mean_error) ** 2))
 
-        # Calcola il Mean Absolute Percentage Error (MeRate)
+        # Mean Absolute Percentage Error (MeRate)
         mean_absolute_percentage_error = np.mean(
             np.abs(np.array(predictions) - np.array(targets_all)) / np.abs(np.array(targets_all)))
         me_rate_list.append(mean_absolute_percentage_error)
 
-        # Calcola Pearson's Correlation Coefficient (?)
+        #  Pearson's Correlation Coefficient (?)
         mean_ground_truth = np.mean(np.array(targets_all))
         mean_predicted_hr = np.mean(np.array(predictions))
         numerator = np.sum((np.array(targets_all) - mean_ground_truth) * (np.array(predictions) - mean_predicted_hr))
@@ -606,11 +687,10 @@ for epoch in range(N_EPOCHS):
         pearson_correlation = numerator / np.sqrt(denominator_ground_truth * denominator_predicted_hr)
         pearson_correlation_list.append(pearson_correlation)
 
-        # Stampa le perdite e le metriche per ogni epoca
         print(
             f'Epoch [{epoch + 1}/{N_EPOCHS}], Train Loss: {avg_train_loss:.4f}, Val Loss: {avg_val_loss:.4f}, RMSE: {rmse:.4f}, MeRate: {mean_absolute_percentage_error:.4f}, Pearson Correlation: {pearson_correlation:.4f}')
 # Test loop
-model.eval()
+best_model.eval()
 test_loss = 0.0
 total = 0
 test_predictions = []
@@ -646,12 +726,15 @@ rmse_test = np.sqrt(((np.array(test_predictions) - np.array(test_targets_all))**
 print(f'Test RMSE: {rmse_test:.4f}')
 
 model_save_path = '/home/ubuntu/data/ecg-fitness_raw-v1.0/dlib/trained_VIT.pth'
-# Salva l'intero modello (compreso l'architettura e i pesi)
 torch.save(best_model, model_save_path)
 #loaded_model = torch.load(model_save_path)
 #loaded_model.to(device)
 
-
+print("True Values\tPredictions")
+for true_val, pred_val in zip(test_targets_all[:100], test_predictions[:100]):
+    true_val_denormalized = CustomDataset.denormalize_hr(true_val)
+    pred_val_denormalized = CustomDataset.denormalize_hr(pred_val)
+    print(f'{true_val_denormalized}\t\t{pred_val_denormalized}')
 
 # def process_video(video_path, video_csv_path, face_detector, landmark_predictor):
 #     try:
