@@ -736,6 +736,39 @@ for true_val, pred_val in zip(test_targets_all[:100], test_predictions[:100]):
     pred_val_denormalized = CustomDataset.denormalize_hr(pred_val)
     print(f'{true_val_denormalized}\t\t{pred_val_denormalized}')
 
+plt.plot(train_loss_list, label='Train Loss')
+plt.plot(val_loss_list, label='Val Loss')
+plt.legend()
+plt.xlabel('Epoch')
+plt.ylabel('Loss')
+plt.title('Training and Validation Loss')
+plt.savefig('/home/ubuntu/data/ecg-fitness_raw-v1.0/dlib/train_val_loss_vit.png')
+plt.close()
+
+plt.plot(rmse_list, label='RMSE')
+plt.legend()
+plt.xlabel('Epoch')
+plt.ylabel('RMSE')
+plt.title('Root Mean Squared Error (RMSE) on Validation Set')
+plt.savefig('/home/ubuntu/data/ecg-fitness_raw-v1.0/dlib/rmse_plot_vit.png')
+plt.close()
+
+plt.plot(me_rate_list, label='Mean Absolute Percentage Error')
+plt.legend()
+plt.xlabel('Epoch')
+plt.ylabel('Mean Absolute Percentage Error')
+plt.title('Mean Absolute Percentage Error on Validation Set')
+plt.savefig('/home/ubuntu/data/ecg-fitness_raw-v1.0/dlib/mape_plot_vit.png')
+plt.close()
+
+plt.plot(pearson_correlation_list, label="Pearson's Correlation Coefficient")
+plt.legend()
+plt.xlabel('Epoch')
+plt.ylabel("Pearson's Correlation Coefficient")
+plt.title("Pearson's Correlation Coefficient on Validation Set")
+plt.savefig('/home/ubuntu/data/ecg-fitness_raw-v1.0/dlib/pearson_corr_plot_vit.png')
+plt.close()
+
 # def process_video(video_path, video_csv_path, face_detector, landmark_predictor):
 #     try:
 #         cap = cv2.VideoCapture(video_path)
@@ -934,34 +967,3 @@ for true_val, pred_val in zip(test_targets_all[:100], test_predictions[:100]):
 #
 #
 # torch.save(model, 'home/ubuntu/ecg-fitness_raw-v1.0/CNNRegressorMIXED.pth')
-# plt.plot(train_loss_list, label='Train Loss')
-# plt.plot(val_loss_list, label='Val Loss')
-# plt.legend()
-# plt.xlabel('Epoch')
-# plt.ylabel('Loss')
-# plt.title('Training and Validation Loss')
-# plt.show()
-#
-# # Plot RMSE
-# plt.plot(rmse_list, label='RMSE')
-# plt.legend()
-# plt.xlabel('Epoch')
-# plt.ylabel('RMSE')
-# plt.title('Root Mean Squared Error (RMSE) on Validation Set')
-# plt.show()
-#
-# # Plot  Mean Absolute Percentage Error
-# plt.plot(me_rate_list, label='Mean Absolute Percentage Error')
-# plt.legend()
-# plt.xlabel('Epoch')
-# plt.ylabel('Mean Absolute Percentage Error')
-# plt.title('Mean Absolute Percentage Error on Validation Set')
-# plt.show()
-#
-# # Plot Pearson's Correlation Coefficient
-# plt.plot(pearson_correlation_list, label="Pearson's Correlation Coefficient")
-# plt.legend()
-# plt.xlabel('Epoch')
-# plt.ylabel("Pearson's Correlation Coefficient")
-# plt.title("Pearson's Correlation Coefficient on Validation Set")
-# plt.show()
