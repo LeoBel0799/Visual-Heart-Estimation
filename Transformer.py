@@ -204,8 +204,8 @@ class CustomDataset(Dataset):
             img = self.transform(img)
 
         norm_mean_hr = self.normalize_hr(mean_hr)
-
-        return img, norm_mean_hr
+        denorm_mean_hr = self.denormalize_hr(norm_mean_hr)
+        return img, norm_mean_hr, denorm_mean_hr
 
 def extract_face_region(image, landmarks):
     landmark_coords = np.array([(landmarks.part(i).x, landmarks.part(i).y) for i in [2, 14, 40, 41, 46, 47, 50, 52]])
@@ -381,24 +381,59 @@ print(f"Total number of samples in val_loader: {total_samples_in_val_loader}")
 total_samples_in_test_loader = len(test_loader.dataset)
 print(f"Total number of samples in test_loader: {total_samples_in_test_loader}")
 
-# # Iterazione attraverso il DataLoader e stampa delle forme
-# for batch in train_loader:
-#     images, labels = batch
+
+
+#-----CODICE PER VISUALIZZARE IMMAGINI E LABEL (COLAB)-------------
+# # Assume che il tuo DataLoader sia chiamato train_loader
+# for batch_idx, (images, norm_targets, denorm_targets) in enumerate(train_loader):
+#     if batch_idx >= 4:
+#         break  # Esce dopo i primi 4 batch
 #
-#     # Stampa la forma del batch di immagini e etichette
-#     print(f"Shape del batch di immagini: {images.shape}")
-#     print(f"Shape del batch di etichette: {labels}")
+#     print(f"Train Batch {batch_idx + 1} - Images shape: {images.shape}, Targets shape: {norm_targets.shape}")
 #
-#     # Se vuoi stampare la forma di ogni singola immagine nel batch, puoi fare un altro ciclo
-#     for img in images:
-#         print(f"Shape di un'immagine nel batch: {img.shape}")
+#     # Estrai le immagini e i target dal batch
+#     batch_images = images.numpy()
+#     batch_norm_targets = norm_targets.numpy()
 #
-#     # Interrompi il ciclo dopo la prima iterazione (se vuoi vedere solo il primo batch)
-#     break
+#     # Visualizza solo 3 immagini per batch
+#     num_images_to_display = min(3, batch_images.shape[0])
+#     for i in range(num_images_to_display):
+#         plt.subplot(1, 3, i + 1)  # Organizza in una griglia 1x3
+#         plt.imshow(np.squeeze(batch_images[i]))  # Trasponi per adattarlo a imshow
+#         plt.title(f'Target: {batch_norm_targets[i]}')
+#
+#     plt.show()
+#
+#
+# # Assume che il tuo DataLoader sia chiamato train_loader
+# for batch_idx, (images, norm_targets, denorm_targets) in enumerate(train_loader):
+#     if batch_idx >= 4:
+#         break  # Esce dopo i primi 4 batch
+#
+#     print(f"Train Batch {batch_idx + 1} - Images shape: {images.shape}, Norm Targets shape: {norm_targets.shape}, Denorm Targets shape: {denorm_targets.shape}")
+#
+#     # Estrai le immagini e i target dal batch
+#     batch_images = images.numpy()
+#     batch_denorm_targets = denorm_targets.numpy()
+#
+#     # Visualizza solo 3 immagini per batch
+#     num_images_to_display = min(3, batch_images.shape[0])
+#     for i in range(num_images_to_display):
+#         plt.subplot(1, 3, i + 1)  # Organizza in una griglia 1x3
+#         plt.imshow(np.squeeze(batch_images[i]))  # Trasponi per adattarlo a imshow
+#         denormalized_target = batch_denorm_targets[i]
+#         plt.title(f'Denormalized Target: {denormalized_target}')
+#
+#     plt.show()
+#---------------------------------------------------------------------------------------------
+
+
+
+
 
 N_EPOCHS = 50
 LR = 0.001
-VAL_EVERY = 2
+VAL_EVERY = 3
 PATIENCE = 5
 WD = 0.01
 
@@ -412,18 +447,23 @@ print(
 
 criterion = nn.MSELoss()
 
+
 def objective(trial, train_loader, test_loader):
-    patch_size = trial.suggest_int('patch_size', 4, 8)
-    emb_dim = trial.suggest_int('emb_dim', 16, 128)
+    patch_size = trial.suggest_categorical('patch_size', [1, 2, 4])
+
+    # Genera 'emb_dim' come multiplo di 'heads'
+    heads = trial.suggest_int('heads', 1, 4)
+    emb_dim = heads * trial.suggest_int('emb_dim', 1, 8)
+
     n_layers = trial.suggest_int('n_layers', 4, 12)
     dropout = trial.suggest_float('dropout', 0.0, 0.5)
-    heads = trial.suggest_int('heads', 1, 3)
-    emb_dim = emb_dim + (heads - emb_dim % heads) % heads
+    print(f"Trying parameters: patch_size={patch_size}, heads={heads}, emb_dim={emb_dim}, n_layers={n_layers}, dropout={dropout}")
+
 
     model = ViT(patch_size=patch_size, emb_dim=emb_dim, n_layers=n_layers, dropout=dropout, heads=heads)
     model.to(device)
 
-    optimizer = AdamW(model.parameters(), lr=LR, weight_decay=WD)
+    optimizer = Adam(model.parameters(), lr=LR, weight_decay=WD)
     criterion = nn.MSELoss()
 
 
@@ -433,7 +473,7 @@ def objective(trial, train_loader, test_loader):
         train_loss = 0.0
 
         for batch in tqdm(train_loader, desc=f"Epoch {epoch + 1}/{N_EPOCHS} in training", leave=True):
-            images, targets = batch
+            images, targets, hr = batch
 
             for image, target in zip(images, targets):
                 # Trasferisci l'immagine e il target sulla GPU
@@ -441,9 +481,8 @@ def objective(trial, train_loader, test_loader):
                 target = target.float().cuda()
                 image = image.unsqueeze(0)
                 target = target.unsqueeze(0)
-                # Aggiungi una dimensione di batch per gestire la singola immagine
                 image = image.unsqueeze(0)
-
+                target = target.unsqueeze(0)
                 outputs = model(image)
                 loss = criterion(outputs, target)
                 optimizer.zero_grad()
@@ -460,7 +499,7 @@ def objective(trial, train_loader, test_loader):
 
         with torch.no_grad():
             for test_batch in tqdm(test_loader, desc=f"Epoch {epoch + 1}/{N_EPOCHS} in validation", leave=True):
-                val_images, val_targets = test_batch
+                val_images, val_targets, val_hr = test_batch
 
                 for val_image, val_target in zip(val_images, val_targets):
                     val_image = val_image.float().cuda()
@@ -468,7 +507,7 @@ def objective(trial, train_loader, test_loader):
                     val_image = val_image.unsqueeze(0)
                     val_target = val_target.unsqueeze(0)
                     val_image = val_image.unsqueeze(0)
-
+                    val_target = val_target.unsqueeze(0)
                     val_outputs = model(val_image)
                     test_loss += criterion(val_outputs, val_target).item()
 
@@ -476,6 +515,226 @@ def objective(trial, train_loader, test_loader):
         print(f"Epoch {epoch + 1}/{N_EPOCHS}, Test RMSE: {math.sqrt(test_loss):.4f}")
 
     return math.sqrt(test_loss)
+
+study = optuna.create_study(direction='minimize')
+study.optimize(lambda trial: objective(trial, train_loader, test_loader), n_trials=5)
+
+best_params = study.best_params
+print("Best Hyperparameters:", best_params)
+
+best_patch_size = best_params['patch_size']
+best_emb_dim = best_params['emb_dim']
+best_n_layers = best_params['n_layers']
+best_dropout = best_params['dropout']
+best_heads = best_params['heads']
+
+best_model = ViT(patch_size=best_patch_size, emb_dim=best_emb_dim, n_layers=best_n_layers, dropout=best_dropout, heads = best_heads)
+print(best_model)
+
+best_model.to(device)
+
+optimizer = AdamW(best_model.parameters(), lr=LR, weight_decay=WD)
+
+best_val_rmse = float('inf')
+no_improvement_count = 0
+
+train_loss_list = []
+val_loss_list = []
+rmse_list = []
+me_rate_list = []
+pearson_correlation_list = []
+
+for epoch in range(N_EPOCHS):
+    best_model.train()
+    train_loss = 0.0
+
+    for batch in tqdm(train_loader, desc=f"Epoch {epoch + 1}/{N_EPOCHS} in training", leave=True):
+        images, targets, hr = batch
+
+        for image, target in zip(images, targets):
+            image = image.float().cuda()
+            target = target.float().cuda()
+            image = image.unsqueeze(0)
+            target = target.unsqueeze(0)
+            target = target.unsqueeze(0)
+            # Aggiungi una dimensione di batch per gestire la singola immagine
+            image = image.unsqueeze(0)
+            #print(image.shape)
+            #print(target)
+            outputs = best_model(image)
+
+            #print(outputs)
+            loss = criterion(outputs, target)
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
+
+        train_loss += loss.item()
+
+    train_loss /= len(train_loader.dataset)
+    print(f"Epoch {epoch + 1}/{N_EPOCHS}, Train RMSE: {math.sqrt(train_loss):.4f}")
+
+    avg_train_loss = train_loss / len(train_loader)
+    train_loss_list.append(avg_train_loss)
+
+    if (epoch + 1) % VAL_EVERY == 0:
+        best_model.eval()
+        val_loss = 0.0
+        predictions = []
+        targets_all = []
+
+        with torch.no_grad():
+            for batch in tqdm(val_loader, desc=f"Epoch {epoch + 1}/{N_EPOCHS} in validation", leave=True):
+                val_images, val_targets, val_hr = batch
+                batch_predictions = []
+
+                for val_image, val_target in zip(val_images, val_targets):
+                    val_image = val_image.float().cuda()
+                    val_target = val_target.float().cuda()
+                    val_image = val_image.unsqueeze(0)
+                    val_target = val_target.unsqueeze(0)
+                    val_target = val_target.unsqueeze(0)
+                    val_image = val_image.unsqueeze(0)
+
+                    val_outputs = best_model(val_image)
+                    #print(f"Attuale: ", val_target)
+                    #print(f"Previsto: ", val_outputs)
+                    val_loss += criterion(val_outputs, val_target).item()
+                    batch_predictions.append(val_outputs.cpu().numpy())
+                    targets_all.append(val_target.cpu().numpy())
+
+                predictions.extend(np.concatenate(batch_predictions, axis=0))
+
+        val_loss /= len(val_loader.dataset)
+        val_rmse = math.sqrt(val_loss)
+
+        print(f"Epoch {epoch + 1}/{N_EPOCHS}, Validation RMSE: {val_rmse:.4f}")
+
+        # Early stopping check
+        if val_rmse < best_val_rmse:
+            best_val_rmse = val_rmse
+            no_improvement_count = 0
+        else:
+            no_improvement_count += 1
+            if no_improvement_count >= PATIENCE:
+                print(f"No improvement for {PATIENCE} epochs. Early stopping.")
+                break  # Spostato il break qui
+
+avg_val_loss = val_loss / len(val_loader)
+val_loss_list.append(avg_val_loss)
+
+# RMSE
+rmse = np.sqrt(np.mean((np.array(predictions) - np.array(targets_all))**2))
+rmse_list.append(rmse)
+
+# Mean Error (Me)
+mean_error = np.mean(np.abs(np.array(predictions) - np.array(targets_all)))
+
+# Standard Deviation Error (SDe)
+std_dev_error = np.sqrt(np.mean((np.array(predictions) - np.array(targets_all) - mean_error)**2))
+
+# Mean Absolute Percentage Error (MeRate)
+absolute_target_values = np.abs(np.array(targets_all))
+me_rate_list.append(np.mean(np.divide(np.abs(np.array(predictions) - np.array(targets_all)),
+                                      np.where(absolute_target_values == 0, 1, absolute_target_values))))
+
+
+
+print(f'Epoch [{epoch + 1}/{N_EPOCHS}], Train Loss: {avg_train_loss:.4f}, Val Loss: {avg_val_loss:.4f}, RMSE: {rmse:.4f}, MeRate: {me_rate_list[-1]:.4f}')
+
+best_model.eval()
+test_loss = 0.0
+test_predictions = []
+test_targets_all = []
+
+with torch.no_grad():
+    for batch in tqdm(test_loader, desc=f"Testing", leave=True):
+        test_images, test_targets, test_hr = batch
+        batch_predictions = []
+
+        for test_image, test_target in zip(test_images, test_targets):
+            test_image = test_image.float().cuda()
+            test_target = test_target.float().cuda()
+            test_image = test_image.unsqueeze(0)
+            test_target = test_target.unsqueeze(0)
+            test_target = test_target.unsqueeze(0)
+            test_image = test_image.unsqueeze(0)
+            test_outputs = best_model(test_image)
+            #print(f"Attuale: ", test_target)
+            #print(f"Previsto: ", test_outputs)
+            # Compute and accumulate the test loss
+            test_loss += criterion(test_outputs, test_target).item()
+
+            # Convert the predictions and targets to numpy arrays
+            batch_predictions.append(test_outputs.cpu().numpy())
+            test_targets_all.append(test_target.cpu().numpy())
+
+        # Extend the test_predictions list with the batch predictions
+        test_predictions.extend(np.concatenate(batch_predictions, axis=0))
+
+# Calculate average test loss
+test_loss /= len(test_loader.dataset)
+test_rmse = math.sqrt(test_loss)
+
+print(f"Test RMSE: {test_rmse:.4f}")
+
+for true_value, predicted_value in zip(test_targets_all, test_predictions):
+    print(f"True Value: {true_value}, Predicted Value: {predicted_value}")
+
+
+model_save_path = '/content/drive/MyDrive/Thesis <BELLIZZI>/ecg-fitness_raw-v1.0/trained_VIT.pth'
+torch.save(best_model, model_save_path)
+#loaded_model = torch.load(model_save_path)
+#loaded_model.to(device)
+
+
+predictions = np.concatenate(predictions, axis=0)
+targets_all = np.concatenate(targets_all, axis=0)
+
+# Plotting true values and predicted values
+plt.figure(figsize=(10, 6))
+plt.plot(targets_all, label='True Values', marker='o')
+plt.plot(predictions, label='Predicted Values', marker='x')
+plt.title('True vs Predicted Values')
+plt.xlabel('Sample Index')
+plt.ylabel('Value')
+plt.legend()
+plt.savefig('/home/ubuntu/data/ecg-fitness_raw-v1.0/dlib/true_vs_predicted.png')
+plt.close()
+
+plt.plot(train_loss_list, label='Train Loss')
+plt.plot(val_loss_list, label='Val Loss')
+plt.legend()
+plt.xlabel('Epoch')
+plt.ylabel('Loss')
+plt.title('Training and Validation Loss')
+plt.savefig('/home/ubuntu/data/ecg-fitness_raw-v1.0/dlib/train_val_loss_vit.png')
+plt.close()
+
+plt.plot(rmse_list, label='RMSE')
+plt.legend()
+plt.xlabel('Epoch')
+plt.ylabel('RMSE')
+plt.title('Root Mean Squared Error (RMSE) on Validation Set')
+plt.savefig('/home/ubuntu/data/ecg-fitness_raw-v1.0/dlib/rmse_plot_vit.png')
+plt.close()
+
+plt.plot(me_rate_list, label='Mean Absolute Percentage Error')
+plt.legend()
+plt.xlabel('Epoch')
+plt.ylabel('Mean Absolute Percentage Error')
+plt.title('Mean Absolute Percentage Error on Validation Set')
+plt.savefig('/home/ubuntu/data/ecg-fitness_raw-v1.0/dlib/mape_plot_vit.png')
+plt.close()
+
+plt.plot(pearson_correlation_list, label="Pearson's Correlation Coefficient")
+plt.legend()
+plt.xlabel('Epoch')
+plt.ylabel("Pearson's Correlation Coefficient")
+plt.title("Pearson's Correlation Coefficient on Validation Set")
+plt.savefig('/home/ubuntu/data/ecg-fitness_raw-v1.0/dlib/pearson_corr_plot_vit.png')
+plt.close()
+
 
 
 # def objective(trial, train_loader, test_loader):
@@ -558,216 +817,7 @@ def objective(trial, train_loader, test_loader):
 #     return math.sqrt(test_loss)  # Restituisci il RMSE come metrica di valutazione
 
 
-study = optuna.create_study(direction='minimize')
-study.optimize(lambda trial: objective(trial, train_loader, test_loader), n_trials=3)
 
-best_params = study.best_params
-print("Best Hyperparameters:", best_params)
-
-best_patch_size = best_params['patch_size']
-best_emb_dim = best_params['emb_dim']
-best_n_layers = best_params['n_layers']
-best_dropout = best_params['dropout']
-best_heads = best_params['heads']
-
-best_model = ViT(patch_size=best_patch_size, emb_dim=best_emb_dim, n_layers=best_n_layers, dropout=best_dropout, heads = best_heads)
-print(best_model)
-
-best_model.to(device)
-
-optimizer = AdamW(best_model.parameters(), lr=LR, weight_decay=WD)
-
-best_val_rmse = float('inf')
-no_improvement_count = 0
-train_loss_list = []
-val_loss_list = []
-rmse_list = []
-me_rate_list = []
-pearson_correlation_list = []
-
-for epoch in range(N_EPOCHS):
-    best_model.train()
-    train_loss = 0.0
-
-    for batch in tqdm(train_loader, desc=f"Epoch {epoch + 1}/{N_EPOCHS} in training", leave=True):
-        images, targets = batch
-
-        for image, target in zip(images, targets):
-            image = image.float().cuda()
-            target = target.float().cuda()
-            image = image.unsqueeze(0)
-            target = target.unsqueeze(0)
-            # Aggiungi una dimensione di batch per gestire la singola immagine
-            image = image.unsqueeze(0)
-            #print(image.shape)
-            #print(target)
-            outputs = best_model(image)
-            loss = criterion(outputs, target)
-            optimizer.zero_grad()
-            loss.backward()
-            optimizer.step()
-
-        train_loss += loss.item()
-
-    train_loss /= len(train_loader.dataset)
-    print(f"Epoch {epoch + 1}/{N_EPOCHS}, Train RMSE: {math.sqrt(train_loss):.4f}")
-
-    avg_train_loss = train_loss / len(train_loader)
-    train_loss_list.append(avg_train_loss)
-
-
-    predictions = []
-    targets_all = []
-    # Validation loop
-    if (epoch + 1) % VAL_EVERY == 0:
-        best_model.eval()
-        val_loss = 0.0
-        total = 0
-        with torch.no_grad():
-
-            for batch in tqdm(val_loader, desc=f"Epoch {epoch + 1}/{N_EPOCHS} in validation", leave=True):
-                images, targets = batch
-
-                for image, target in zip(images, targets):
-                    # Transfer image and target to GPU
-                    image = image.float().cuda()
-                    target = target.float().cuda()
-                    image = image.unsqueeze(0)
-                    target = target.unsqueeze(0)
-                    image = image.unsqueeze(0)
-
-                    outputs = best_model(image)
-                    outputs = outputs.cpu()
-                    target = target.cpu()
-                    loss = criterion(outputs, target)
-                    val_loss += loss.item()
-
-                predictions.extend(outputs.numpy())
-                targets_all.extend(target.numpy())
-
-        val_loss /= len(val_loader.dataset)
-        val_rmse = math.sqrt(val_loss)
-
-        print(f"Epoch {epoch + 1}/{N_EPOCHS}, Validation RMSE: {val_rmse:.4f}")
-
-        # Early stopping check
-        if val_rmse < best_val_rmse:
-            best_val_rmse = val_rmse
-            no_improvement_count = 0
-        else:
-            no_improvement_count += 1
-            if no_improvement_count >= PATIENCE:
-                print(f"No improvement for {PATIENCE} epochs. Early stopping.")
-                break
-
-        avg_val_loss = val_loss / len(val_loader)
-        val_loss_list.append(avg_val_loss)
-
-        #  RMSE
-        rmse = np.sqrt(((np.array(predictions) - np.array(targets_all)) ** 2).mean())
-        rmse_list.append(rmse)
-
-        # Media dell'errore di misura (Me)
-        mean_error = np.mean(np.abs(np.array(predictions) - np.array(targets_all)))
-
-        # Deviazione standard dell'errore di misura (SDe)
-        std_dev_error = np.sqrt(np.mean((np.array(predictions) - np.array(targets_all) - mean_error) ** 2))
-
-        # Mean Absolute Percentage Error (MeRate)
-        mean_absolute_percentage_error = np.mean(
-            np.abs(np.array(predictions) - np.array(targets_all)) / np.abs(np.array(targets_all)))
-        me_rate_list.append(mean_absolute_percentage_error)
-
-        #  Pearson's Correlation Coefficient (?)
-        mean_ground_truth = np.mean(np.array(targets_all))
-        mean_predicted_hr = np.mean(np.array(predictions))
-        numerator = np.sum((np.array(targets_all) - mean_ground_truth) * (np.array(predictions) - mean_predicted_hr))
-        denominator_ground_truth = np.sum((np.array(targets_all) - mean_ground_truth) ** 2)
-        denominator_predicted_hr = np.sum((np.array(predictions) - mean_predicted_hr) ** 2)
-        pearson_correlation = numerator / np.sqrt(denominator_ground_truth * denominator_predicted_hr)
-        pearson_correlation_list.append(pearson_correlation)
-
-        print(
-            f'Epoch [{epoch + 1}/{N_EPOCHS}], Train Loss: {avg_train_loss:.4f}, Val Loss: {avg_val_loss:.4f}, RMSE: {rmse:.4f}, MeRate: {mean_absolute_percentage_error:.4f}, Pearson Correlation: {pearson_correlation:.4f}')
-# Test loop
-best_model.eval()
-test_loss = 0.0
-total = 0
-test_predictions = []
-test_targets_all = []
-
-with torch.no_grad():
-
-    for batch in tqdm(test_loader, desc='Testing'):
-        images, targets = batch
-
-        for image, target in zip(images, targets):
-            # Trasferisci l'immagine e il target sulla GPU
-            image = image.float().cuda()
-            target = target.float().cuda()
-            image = image.unsqueeze(0)
-            target = target.unsqueeze(0)
-            image = image.unsqueeze(0)
-        # Forward pass
-            outputs = best_model(image)
-            loss = criterion(outputs, targets)
-        test_loss += loss.item()
-
-        # Salva le previsioni e i target per ulteriori analisi
-        test_predictions.extend(outputs.cpu().numpy())
-        test_targets_all.extend(targets.cpu().numpy())
-
-# Calcola la perdita media per l'epoca di test
-avg_test_loss = test_loss / len(test_loader)
-print(f'Test Loss: {avg_test_loss:.4f}')
-
-#  RMSE
-rmse_test = np.sqrt(((np.array(test_predictions) - np.array(test_targets_all))**2).mean())
-print(f'Test RMSE: {rmse_test:.4f}')
-
-model_save_path = '/home/ubuntu/data/ecg-fitness_raw-v1.0/dlib/trained_VIT.pth'
-torch.save(best_model, model_save_path)
-#loaded_model = torch.load(model_save_path)
-#loaded_model.to(device)
-
-print("True Values\tPredictions")
-for true_val, pred_val in zip(test_targets_all[:100], test_predictions[:100]):
-    true_val_denormalized = CustomDataset.denormalize_hr(true_val)
-    pred_val_denormalized = CustomDataset.denormalize_hr(pred_val)
-    print(f'{true_val_denormalized}\t\t{pred_val_denormalized}')
-
-plt.plot(train_loss_list, label='Train Loss')
-plt.plot(val_loss_list, label='Val Loss')
-plt.legend()
-plt.xlabel('Epoch')
-plt.ylabel('Loss')
-plt.title('Training and Validation Loss')
-plt.savefig('/home/ubuntu/data/ecg-fitness_raw-v1.0/dlib/train_val_loss_vit.png')
-plt.close()
-
-plt.plot(rmse_list, label='RMSE')
-plt.legend()
-plt.xlabel('Epoch')
-plt.ylabel('RMSE')
-plt.title('Root Mean Squared Error (RMSE) on Validation Set')
-plt.savefig('/home/ubuntu/data/ecg-fitness_raw-v1.0/dlib/rmse_plot_vit.png')
-plt.close()
-
-plt.plot(me_rate_list, label='Mean Absolute Percentage Error')
-plt.legend()
-plt.xlabel('Epoch')
-plt.ylabel('Mean Absolute Percentage Error')
-plt.title('Mean Absolute Percentage Error on Validation Set')
-plt.savefig('/home/ubuntu/data/ecg-fitness_raw-v1.0/dlib/mape_plot_vit.png')
-plt.close()
-
-plt.plot(pearson_correlation_list, label="Pearson's Correlation Coefficient")
-plt.legend()
-plt.xlabel('Epoch')
-plt.ylabel("Pearson's Correlation Coefficient")
-plt.title("Pearson's Correlation Coefficient on Validation Set")
-plt.savefig('/home/ubuntu/data/ecg-fitness_raw-v1.0/dlib/pearson_corr_plot_vit.png')
-plt.close()
 
 # def process_video(video_path, video_csv_path, face_detector, landmark_predictor):
 #     try:
