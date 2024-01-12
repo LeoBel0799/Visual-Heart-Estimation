@@ -390,12 +390,10 @@ def process_video(video_path, video_csv_path, face_detector, landmark_predictor,
     return current_dataset
 
 
-def process_and_create_dataset (main_directory, video_to_process):
+def process_and_create_dataset(main_directory, video_to_process):
     main_directories = [d for d in os.listdir(main_directory) if os.path.isdir(os.path.join(main_directory, d))]
     face_detector = dlib.cnn_face_detection_model_v1("/home/ubuntu/data/ecg-fitness_raw-v1.0/mmod_human_face_detector.dat")
-    landmark_predictor = dlib.shape_predictor(
-        "/home/ubuntu/data/ecg-fitness_raw-v1.0/shape_predictor_68_face_landmarks_GTX.dat")
-    tracker = cv2.TrackerCSRT_create()
+    landmark_predictor = dlib.shape_predictor("/home/ubuntu/data/ecg-fitness_raw-v1.0/shape_predictor_68_face_landmarks_GTX.dat")
     processed_videos = 0
     all_datasets = []
 
@@ -410,7 +408,8 @@ def process_and_create_dataset (main_directory, video_to_process):
 
             for video_file in video_files:
                 if processed_videos >= video_to_process:
-                   break
+                    break
+
                 video_images = []
                 video_path = os.path.join(sub_dir_path, video_file)
                 fin_csv_files = [f for f in os.listdir(sub_dir_path) if f.startswith("ecg") and f.endswith(".csv")]
@@ -422,7 +421,9 @@ def process_and_create_dataset (main_directory, video_to_process):
                     print(f"Error: No or multiple 'fin' CSV files found in {sub_dir_path}")
                     continue
 
-                current_dataset = process_video(video_path,video_csv_path, face_detector,landmark_predictor,tracker, Pl, Fps, Fl, Fh)
+                tracker = cv2.TrackerGOTURN_create()
+
+                current_dataset = process_video(video_path, video_csv_path, face_detector, landmark_predictor, tracker, Pl, Fps, Fl, Fh)
 
                 if current_dataset is not None:
                     current_dataset_length = len(current_dataset)
@@ -440,8 +441,9 @@ def process_and_create_dataset (main_directory, video_to_process):
     return combined_dataset
 
 
+
 main_directory = "/home/ubuntu/data/ecg-fitness_raw-v1.0"
-video_to_process = 80
+video_to_process = 70
 dataset_path = "/home/ubuntu/data/ecg-fitness_raw-v1.0/dlib/combined_dataset_EVMCNN.pth"
 final_dataset = process_and_create_dataset(main_directory,video_to_process)
 torch.save(final_dataset, dataset_path)
@@ -479,7 +481,7 @@ criterion = nn.MSELoss()
 optimizer = optim.Adam(model.parameters(), lr=0.001)
 
 # Definisci il numero di epoche
-num_epochs = 150
+num_epochs = 50
 # Creazione del modello
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print(
@@ -603,46 +605,48 @@ for epoch in range(num_epochs):
     # Print metrics for the test phase
     print(f'Test Loss: {avg_test_loss:.4f}, RMSE: {rmse_test:.4f}, Mean Error: {me_test:.4f}, SDe: {sde_test:.4f}, MeRate: {me_rate_test:.4f}, Pearson Correlation: {pearson_correlation_test:.4f}')
 
-torch.save(model, 'home/ubuntu/ecg-fitness_raw-v1.0/EVM-CNNRegressor.pth')# Plot delle perdite durante l'addestramento e la validazione
+torch.save(model, 'home/ubuntu/ecg-fitness_raw-v1.0/dlibEVM-CNNRegressor.pth')# Plot delle perdite durante l'addestramento e la validazione
+
+for true_value, predicted_value in zip(targets_all_test, predictions_test):
+    print(f"True Value: {true_value}, Predicted Value: {predicted_value}")
 
 
-# plt.plot(targets_all_test, label='Ground Truth')
-# plt.plot(predictions_test, label='Predicted')
-# plt.xlabel('Sample Index')
-# plt.ylabel('Value')
-# plt.legend()
-# plt.title('Test Set: Predicted vs Ground Truth Over Time')
-# plt.show()
-#
-#
-# plt.plot(train_loss_list, label='Train Loss')
-# plt.plot(val_loss_list, label='Val Loss')
-# plt.legend()
-# plt.xlabel('Epoch')
-# plt.ylabel('Loss')
-# plt.title('Training and Validation Loss')
-# plt.show()
-#
-# # Plot della RMSE
-# plt.plot(rmse_list, label='RMSE')
-# plt.legend()
-# plt.xlabel('Epoch')
-# plt.ylabel('RMSE')
-# plt.title('Root Mean Squared Error (RMSE) on Validation Set')
-# plt.show()
-#
-# # Plot del Mean Absolute Percentage Error
-# plt.plot(me_rate_list, label='Mean Absolute Percentage Error')
-# plt.legend()
-# plt.xlabel('Epoch')
-# plt.ylabel('Mean Absolute Percentage Error')
-# plt.title('Mean Absolute Percentage Error on Validation Set')
-# plt.show()
-#
-# # Plot di Pearson's Correlation Coefficient
-# plt.plot(pearson_correlation_list, label="Pearson's Correlation Coefficient")
-# plt.legend()
-# plt.xlabel('Epoch')
-# plt.ylabel("Pearson's Correlation Coefficient")
-# plt.title("Pearson's Correlation Coefficient on Validation Set")
-# plt.show()
+
+predictions = np.concatenate(predictions, axis=0)
+targets_all = np.concatenate(targets_all, axis=0)
+
+# Plotting true values and predicted values
+plt.figure(figsize=(10, 6))
+plt.plot(targets_all, label='True Values', marker='o')
+plt.plot(predictions, label='Predicted Values', marker='x')
+plt.title('True vs Predicted Values')
+plt.xlabel('Sample Index')
+plt.ylabel('Value')
+plt.legend()
+plt.savefig('/home/ubuntu/data/ecg-fitness_raw-v1.0/dlib/true_vs_predicted.png')
+plt.close()
+
+plt.plot(train_loss_list, label='Train Loss')
+plt.plot(val_loss_list, label='Val Loss')
+plt.legend()
+plt.xlabel('Epoch')
+plt.ylabel('Loss')
+plt.title('Training and Validation Loss')
+plt.savefig('/home/ubuntu/data/ecg-fitness_raw-v1.0/dlib/train_val_loss_vit.png')
+plt.close()
+
+plt.plot(rmse_list, label='RMSE')
+plt.legend()
+plt.xlabel('Epoch')
+plt.ylabel('RMSE')
+plt.title('Root Mean Squared Error (RMSE) on Validation Set')
+plt.savefig('/home/ubuntu/data/ecg-fitness_raw-v1.0/dlib/rmse_plot_vit.png')
+plt.close()
+
+plt.plot(me_rate_list, label='Mean Absolute Percentage Error')
+plt.legend()
+plt.xlabel('Epoch')
+plt.ylabel('Mean Absolute Percentage Error')
+plt.title('Mean Absolute Percentage Error on Validation Set')
+plt.savefig('/home/ubuntu/data/ecg-fitness_raw-v1.0/dlib/mape_plot_vit.png')
+plt.close()

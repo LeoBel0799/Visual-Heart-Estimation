@@ -727,14 +727,6 @@ plt.title('Mean Absolute Percentage Error on Validation Set')
 plt.savefig('/home/ubuntu/data/ecg-fitness_raw-v1.0/dlib/mape_plot_vit.png')
 plt.close()
 
-plt.plot(pearson_correlation_list, label="Pearson's Correlation Coefficient")
-plt.legend()
-plt.xlabel('Epoch')
-plt.ylabel("Pearson's Correlation Coefficient")
-plt.title("Pearson's Correlation Coefficient on Validation Set")
-plt.savefig('/home/ubuntu/data/ecg-fitness_raw-v1.0/dlib/pearson_corr_plot_vit.png')
-plt.close()
-
 
 
 # def objective(trial, train_loader, test_loader):
