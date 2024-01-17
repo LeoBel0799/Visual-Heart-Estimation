@@ -42,6 +42,9 @@ import cv2
 import numpy as np
 import matplotlib.pyplot as plt
 import torch
+import warnings
+
+warnings.filterwarnings("ignore")
 
 
 class SeparableConvBlock(nn.Module):
@@ -57,7 +60,6 @@ class SeparableConvBlock(nn.Module):
         x = self.pointwise_conv(x)
         x = self.batch_norm(x)
         return F.relu(x)
-
 
 class CNNBody(nn.Module):
     def __init__(self):
@@ -97,38 +99,27 @@ class CNNBody(nn.Module):
         x = self.fc2(x)
         return x
 
-
-# Instantiate the model
 model = CNNBody()
 
-
 class CustomDataset(Dataset):
-    def __init__(self, images_list, csv_path, transform=None):
+    def __init__(self, images_list, rows, transform=None):
         self.images_list = images_list
-        self.df = pd.read_csv(csv_path)
+        self.df = rows
         self.transform = transform
 
-        self.mean_hr_mapping = {i: self.compute_group_mean(i) for i in range(len(self.df) // 31)}
-        self.image_mapping = {i: img for i, img in enumerate(self.images_list)}
-        shared_indices = set(self.mean_hr_mapping.keys()) & set(self.image_mapping.keys())
-        shared_indices = sorted(shared_indices)
-        self.shared_data = [(self.image_mapping[idx], self.mean_hr_mapping[idx]) for idx in shared_indices]
+        self.num_images = len(self.images_list)
+        self.ecg_hr_values = self.df[' ECG HR'].tolist()
 
-    def compute_group_mean(self, group_idx):
-        start_idx = group_idx * 31
-        end_idx = min((group_idx + 1) * 31, len(self.df))
-        group_data = self.df.loc[start_idx:end_idx - 1, ' ECG HR']
-        return round(group_data.mean(), 3)
 
     def __len__(self):
-        return len(self.shared_data)
+        return self.num_images
 
     def __getitem__(self, idx):
-        img, mean_hr = self.shared_data[idx]
+        img = self.images_list[idx]
+        ecg_hr = self.ecg_hr_values[idx]
 
-        # print(f"Shape dell'immagine: {img.shape}, Etichetta1: {mean_hr}")
+        return img, ecg_hr
 
-        return img, mean_hr
 
 
 class CustomDatasetNormalized(Dataset):
@@ -144,15 +135,13 @@ class CustomDatasetNormalized(Dataset):
             hr_norm = float(hr_norm)
             hr_original = float(hr_original)
         except ValueError:
-            raise ValueError(f"Errore: hr_norm o hr_original non sono numeri per l'indice {idx}")
+            raise ValueError(f"Errore: hr_norm o hr_original are not numbers in index: {idx}")
 
 
         return img, hr_norm, hr_original
 
 
 def extract_face_region(image, landmarks):
-    landmark_coords = np.array([(landmarks.part(i).x, landmarks.part(i).y) for i in [2, 14, 40, 41, 46, 47, 50, 52]])
-
     XLT = landmarks.part(14).x
     YLT = max(landmarks.part(40).y, landmarks.part(41).y, landmarks.part(46).y, landmarks.part(47).y)
     Wrect = landmarks.part(2).x - landmarks.part(14).x
@@ -207,50 +196,49 @@ def apply_bandpass_filter(image, Fl, Fh):
 
     return Ni
 
-
 def extract_features(video_frames, Pl, Fps, Fl, Fh):
-    feature_images = []
+     feature_images = []
 
-    while len(video_frames) >= Fps:
-        # Process Fps frames
-        intermediate_images = [
-            reshape_to_one_column(gaussian_pyramid(frame, Pl))
-            for frame in video_frames[:Fps]
-        ]
-        video_frames = video_frames[Fps:]
+     while len(video_frames) >= Fps:
+         # Process Fps frames
+         intermediate_images = [
+             reshape_to_one_column(gaussian_pyramid(frame, Pl))
+             for frame in video_frames[:Fps]
+         ]
+         video_frames = video_frames[Fps:]
 
-        # Regola la dimensione lungo l'asse 0
-        min_rows = min(img.shape[0] for img in intermediate_images)
-        intermediate_images = [img[:min_rows, :] for img in intermediate_images]
+         # Regola la dimensione lungo l'asse 0
+         min_rows = min(img.shape[0] for img in intermediate_images)
+         intermediate_images = [img[:min_rows, :] for img in intermediate_images]
 
-        # Concatenate columns
-        C = np.concatenate(intermediate_images, axis=1)
+         # Concatenate columns
+         C = np.concatenate(intermediate_images, axis=1)
 
-        while C.shape[1] >= Fps:
-            # Applica il filtro passa-banda ed estrai le feature
-            if C.shape[1] >= 3:
-                feature_image = apply_bandpass_filter(C[:, :Fps], Fl, Fh)
+         while C.shape[1] >= Fps:
+             # Applica il filtro passa-banda ed estrai le feature
+             if C.shape[1] >= 3:
+                 feature_image = apply_bandpass_filter(C[:, :Fps], Fl, Fh)
 
-                # Rendi la feature image 25x25x3
-                feature_image = cv2.resize(feature_image, (25, 25))
-                # plt.imshow(feature_image)
-                # plt.show()
-                feature_image = np.expand_dims(feature_image, axis=-1)
-                feature_image = np.concatenate([feature_image] * 3, axis=-1)
+                 # Rendi la feature image 25x25x3
+                 feature_image = cv2.resize(feature_image, (25, 25))
+                 # plt.imshow(feature_image)
+                 # plt.show()
+                 feature_image = np.expand_dims(feature_image, axis=-1)
+                 feature_image = np.concatenate([feature_image] * 3, axis=-1)
 
-                # PyTorch vuole il formato CHW, quindi permuta gli assi
-                feature_image = np.transpose(feature_image, (2, 0, 1))
+                 # PyTorch vuole il formato CHW, quindi permuta gli assi
+                 feature_image = np.transpose(feature_image, (2, 0, 1))
 
-                # Converti in tensore PyTorch
-                feature_image_tensor = torch.from_numpy(feature_image).float()
+                 # Converti in tensore PyTorch
+                 feature_image_tensor = torch.from_numpy(feature_image).float()
 
-                # Salva il tensore delle feature
-                feature_images.append(feature_image_tensor)
+                 # Salva il tensore delle feature
+                 feature_images.append(feature_image_tensor)
 
-            # Rimuovi le colonne elaborate
-            C = C[:, Fps:]
+             # Rimuovi le colonne elaborate
+             C = C[:, Fps:]
 
-    return feature_images
+     return feature_images
 
 
 Pl = 4
@@ -266,15 +254,6 @@ def process_video(video_path, video_csv_path, face_detector, landmark_predictor,
         print(f"Error opening video file: {video_path}")
         return
     rois_list = []
-    # rois_list = []
-    # resized_rois = []
-    #
-    # # Read the first frame
-    # ret, frame = cap.read()
-    #
-    # # List to save face regions frame by frame
-    # face_regions = []
-    # Load ECG data
     ecg_data = pd.read_csv(video_csv_path, index_col='milliseconds')
     ecg_timestamps = ecg_data.index
 
@@ -283,12 +262,14 @@ def process_video(video_path, video_csv_path, face_detector, landmark_predictor,
     frame_rate = cap.get(cv2.CAP_PROP_FPS)
 
     # Limit the number of frames to analyze
-    max_time_to_analyze_seconds = 40  # Adjust the desired time duration in seconds
+    max_time_to_analyze_seconds = 30  # Adjust the desired time duration in seconds
+    sampling_interval_ms = 10
+
     max_frames_to_analyze = int(max_time_to_analyze_seconds * frame_rate)
     df = pd.read_csv(video_csv_path)
     # Filtra il DataFrame per ottenere solo le righe entro i primi tot secondi
     df = df[df['milliseconds'] <= max_time_to_analyze_seconds * 1000]
-    # Create a progress bar
+    selected_rows = df[df['milliseconds'] % sampling_interval_ms == 0]
     progress_bar = tqdm(total=min(total_frames, max_frames_to_analyze), position=0, leave=True,
                         desc=f'Processing Frames for {video_path}')
 
@@ -301,7 +282,8 @@ def process_video(video_path, video_csv_path, face_detector, landmark_predictor,
         if not ret or frame_count >= max_frames_to_analyze:
             break
 
-        faces = face_detector(frame, 1)
+        if frame_count % 10 == 0:
+            faces = face_detector(frame, 1)
 
         if not faces:
             frame_count += 1
@@ -312,62 +294,21 @@ def process_video(video_path, video_csv_path, face_detector, landmark_predictor,
 
         face_region = extract_face_region(frame, landmarks)
         if face_region is not None:
-            # video_frame_timestamp = frame_count * (1000 / frame_rate)
-            # closest_timestamp = min(ecg_timestamps, key=lambda x: abs(x - video_frame_timestamp))
-
-            # Find the ECG value using direct access to the DataFrame
-            # ecg_value = ecg_data.at[closest_timestamp, " ECG HR"]
-
-            # Add the face region and associated ECG value to the list
             rois_list.append(face_region)
-
-            # Find maximum dimensions
-            # max_width = max(roi.shape[1] for roi in rois_list)
-            # max_height = max(roi.shape[0] for roi in rois_list)
-
-            # Resize all ROIs simultaneously
-            # resized_rois = [cv2.resize(roi, (max_width, max_height)) for roi in rois_list]
-
             bbox = (face.rect.left(), face.rect.top(), face.rect.width(), face.rect.height())
             tracker.init(frame, bbox)
 
-        if faces and tracker:
-            ret, bbox = tracker.update(frame)
-
-        #     if ret:
-        #         bbox = tuple(map(int, bbox))
-        #
-        #         if 0 <= bbox[0] < frame.shape[1] and 0 <= bbox[1] < frame.shape[0] and \
-        #            0 <= bbox[0] + bbox[2] < frame.shape[1] and 0 <= bbox[1] + bbox[3] < frame.shape[0]:
-        #             p1 = (bbox[0], bbox[1])
-        #             p2 = (bbox[0] + bbox[2], bbox[1] + bbox[3])
-        #
-        #             cv2.rectangle(frame, p1, p2, (0, 255, 0), 2)
-        #
-        # cv2.rectangle(frame, (bbox[0], bbox[1]), (bbox[0] + bbox[2], bbox[1] + bbox[3]), (0, 255, 0), 2)
-        #
-        # for i in range(68):
-        #     cv2.circle(frame, (landmarks.part(i).x, landmarks.part(i).y), 2, (0, 255, 255), -1)
 
         progress_bar.update(1)
         frame_count += 1
 
     progress_bar.close()
-
     print(f"Video analyzed for {video_path}")
-
-    # max_width = max(roi.shape[1] for roi in rois_list)
-    # max_height = max(roi.shape[0] for roi in rois_list)
-
-    # resized_rois = [cv2.resize(roi, (max_width, max_height)) for roi in rois_list]
-
     features_img = extract_features(rois_list, Pl, Fps, Fl, Fh)
-
     video_images.extend(features_img)
-
     print(f"Features extracted for {video_path}")
+    current_dataset = CustomDataset(video_images,selected_rows)
 
-    current_dataset = CustomDataset(video_images, video_csv_path)
     return current_dataset
 
 
@@ -393,9 +334,13 @@ def process_and_create_dataset(main_directory, video_to_process):
                 if processed_videos >= video_to_process:
                     break
 
-                video_images = []
                 video_path = os.path.join(sub_dir_path, video_file)
                 fin_csv_files = [f for f in os.listdir(sub_dir_path) if f.startswith("ecg") and f.endswith(".csv")]
+                for csv_file in fin_csv_files:
+                    file_path = os.path.join(sub_dir_path, csv_file)
+                    df = pd.read_csv(file_path)
+                    df = df[df[' ECG HR'] >= 0]
+                    df.to_csv(file_path, index=False)
 
                 if len(fin_csv_files) == 1:
                     fin_csv_file = fin_csv_files[0]
@@ -435,31 +380,24 @@ def normalize(custom_dataset, normalized_dataset):
 
     for i in range(len(custom_dataset)):
         img, mean_hr = custom_dataset[i]
-
         norm_mean_hr = (mean_hr - min_mean_hr) / (max_mean_hr - min_mean_hr)
-
-        # norm_mean_hr_tensor = torch.tensor(norm_mean_hr, dtype=torch.float32)
-        # mean_hr_tensor = torch.tensor(mean_hr, dtype= torch.float32)
         normalized_dataset.append([img, norm_mean_hr, mean_hr])
-
-        for item in normalized_dataset:
-            if len(item) != 3:
-                print(f"Unexpected item structure: {item}")
-
     return CustomDatasetNormalized(normalized_dataset), min_mean_hr, max_mean_hr
 
 
 def denormalize(y, max_v, min_v):
-    final_value = y * (max_v - max_v) + min_v
+    final_value = y * (max_v - min_v) + min_v
     return final_value
 
 
 main_directory = "/home/ubuntu/data/ecg-fitness_raw-v1.0"
-video_to_process = 7
-dataset_path = "/home/ubuntu/data/ecg-fitness_raw-v1.0/dlib/combined_dataset_EVMCNN.pth"
+video_to_process = 10
+dataset_path = "/home/ubuntu/data/ecg-fitness_raw-v1.0/dlib/Dataset/EVMCNN.pth"
 final_dataset = process_and_create_dataset(main_directory, video_to_process)
 norm_dataset = []
 normalized_dataset, min_for_denorm, max_for_denorm = normalize(final_dataset, norm_dataset)
+
+
 torch.save(normalized_dataset, dataset_path)
 print("Global custom dataset saved!")
 loaded_dataset = torch.load(dataset_path)
@@ -471,14 +409,28 @@ test_size = len(loaded_dataset) - train_size - val_size
 
 train_dataset, val_dataset, test_dataset = random_split(loaded_dataset, [train_size, val_size, test_size])
 
-batch_size = 64
+batch_size = 16
 train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, pin_memory=True)
 val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False, pin_memory=True)
 test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False, pin_memory=True)
 
-criterion = nn.MSELoss()
+total_samples_in_train_loader = len(train_loader.dataset)
+print(f"Total number of samples in train_loader: {total_samples_in_train_loader}")
 
-optimizer = optim.Adam(model.parameters(), lr=0.001)
+total_samples_in_val_loader = len(val_loader.dataset)
+print(f"Total number of samples in val_loader: {total_samples_in_val_loader}")
+
+total_samples_in_test_loader = len(test_loader.dataset)
+print(f"Total number of samples in test_loader: {total_samples_in_test_loader}")
+
+criterion = nn.MSELoss()
+LR = 0.001
+PATIENCE = 5
+WD = 0.01
+
+optimizer = AdamW(model.parameters(), lr=LR, weight_decay=WD)
+
+
 
 num_epochs = 50
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -488,129 +440,139 @@ print(
     f"({torch.cuda.get_device_name(device)})" if torch.cuda.is_available() else "",
 )
 
+
+best_val_rmse = float('inf')
+no_improvement_count = 0
+
 train_loss_list = []
 val_loss_list = []
-rmse_list = []
-me_rate_list = []
-pearson_correlation_list = []
+rmse_list_val = []
+best_val_rmse = float('inf')
+no_improvement_count = 0
 model.to(device)
+normalized_value_list_validation = []
+denormalized_values_list_validation = []
 
 for epoch in range(num_epochs):
     model.train()
     train_loss = 0.0
 
-    for images, targets_norm, targets_original in tqdm(train_loader, desc=f'Epoch {epoch + 1}/{num_epochs}'):
+    for batch in tqdm(train_loader, desc=f'Epoch {epoch + 1}/{num_epochs}'):
+        images, targets_norm, targets_original = batch
         images, targets_norm, targets_original = images.to(device), targets_norm.to(device), targets_original.to(device)
-        model = model.to(torch.float32)
+
         images = images.to(torch.float32)
         targets_norm = targets_norm.to(torch.float32)
-        targets_norm = targets_norm.unsqueeze(0)
         targets_original = targets_original.to(torch.float32)
 
         outputs = model(images)
         loss = criterion(outputs, targets_norm)
-
+        train_loss += loss.detach().cpu().item() / len(train_loader)
         optimizer.zero_grad()
         loss.backward()
         optimizer.step()
 
         train_loss += loss.item()
+    print(f"Epoch {epoch + 1}/{num_epochs} loss: {train_loss:.2f}")
 
     avg_train_loss = train_loss / len(train_loader)
     train_loss_list.append(avg_train_loss)
 
     model.eval()
-    val_loss = 0.0
     predictions = []
     targets_all = []
     with torch.no_grad():
-        for images, targets_norm, targets_original in tqdm(val_loader, desc='Validation'):
-            images, targets_norm, targets_original = images.to(device), targets_norm.to(device), targets_original.to(device)
-            model = model.to(torch.float32)
+        val_loss = 0.0
+        correct, total = 0, 0
+
+        for batch in tqdm(val_loader, desc='Validation'):
+            images, targets_norm, targets_original = batch
+            images, targets_norm, targets_original = images.to(device), targets_norm.to(device), targets_original.to(
+                device)
+
             images = images.to(torch.float32)
             targets_norm = targets_norm.to(torch.float32)
-            targets_norm = targets_norm.unsqueeze(0)
             targets_original = targets_original.to(torch.float32)
 
             outputs = model(images)
             loss = criterion(outputs, targets_norm)
-            val_loss += loss.item()
-
+            val_loss += loss.detach().cpu().item() / len(val_loader)
+            correct += torch.sum(torch.argmax(outputs, dim=1) == targets_norm).detach().cpu().item()
+            total += len(images)
             predictions.extend(outputs.cpu().numpy())
             targets_all.extend(targets_norm.cpu().numpy())
 
-    # plot_predictions(targets_all, predictions, f'Validation - Predicted vs Ground Truth')
-
+    mse = mean_squared_error(targets_all, predictions)
+    rmse_validation = np.sqrt(mse)
+    rmse_list_val.append(rmse_validation)
     avg_val_loss = val_loss / len(val_loader)
     val_loss_list.append(avg_val_loss)
 
-    # RMSE
-    rmse = np.sqrt(((np.array(predictions) - np.array(targets_all)) ** 2).mean())
-    rmse_list.append(rmse)
-
-    # media dell'errore di misura (Me)
-    mean_error = np.mean(np.abs(np.array(predictions) - np.array(targets_all)))
-
-    # Calcola deviazione standard dell'errore di misura (SDe)
-    std_dev_error = np.sqrt(np.mean((np.array(predictions) - np.array(targets_all) - mean_error) ** 2))
-
-    # Calcola Mean Absolute Percentage Error (MeRate)
-    mean_absolute_percentage_error = np.mean(
-        np.abs(np.array(predictions) - np.array(targets_all)) / np.abs(np.array(targets_all)))
-    me_rate_list.append(mean_absolute_percentage_error)
-
-    # Stampa le perdite e le metriche per ogni epoca
-    print(
-        f'Epoch [{epoch + 1}/{num_epochs}], Train Loss: {avg_train_loss:.4f}, Val Loss: {avg_val_loss:.4f}, RMSE: {rmse:.4f}, MeRate: {mean_absolute_percentage_error:.4f}')
-
+    print(f"Epoch {epoch + 1}/{num_epochs}, Validation RMSE: {rmse_validation:.4f},  Avg validation Loss: {avg_val_loss}")
+    # Early stopping check
+    if rmse_validation < best_val_rmse:
+        best_val_rmse = rmse_validation
+        no_improvement_count = 0
+    else:
+        no_improvement_count += 1
+        if no_improvement_count >= PATIENCE:
+            print(f"No improvement for {PATIENCE} epochs. Early stopping.")
+            break
 
 # Testing
 model.eval()
-test_loss = 0.0
+predictions = []
+targets_all = []
 predictions_test = []
 targets_all_test = []
 test_loss_list = []
+
+normalized_value_list = []
+denormalized_values_list_pred = []
+denormalized_values_list_target = []
+
+
 with torch.no_grad():
-    for images, targets_norm, targets_original in tqdm(test_loader, desc='Testing'):
+    test_loss = 0.0
+    for batch in tqdm(test_loader, desc='Testing'):
+        images, targets_norm, targets_original = batch
         images, targets_norm, targets_original = images.to(device), targets_norm.to(device), targets_original.to(device)
 
-        model = model.to(torch.float32)
         images = images.to(torch.float32)
         targets_norm = targets_norm.to(torch.float32)
-        targets_norm = targets_norm.unsqueeze(0)
         targets_original = targets_original.to(torch.float32)
 
         outputs = model(images)
-        print(outputs)
         loss = criterion(outputs, targets_norm)
-        test_loss += loss.item()
-        predictions_denormalized = [denormalize(pred.item(), min_for_denorm, max_for_denorm) for pred in outputs]
+        test_loss += loss.detach().cpu().item() / len(test_loader)
         predictions.extend(outputs.cpu().numpy())
         targets_all.extend(targets_norm.cpu().numpy())
 
-# Calculate average test loss
-test_loss /= len(test_loader.dataset)
-test_rmse = math.sqrt(test_loss)
+    for value in predictions:
+        denormalized_value = np.round(denormalize(value[0], max_for_denorm, min_for_denorm), 2)
+        denormalized_values_list_pred.append(denormalized_value)
 
-print(f"Test RMSE: {test_rmse:.4f}")
-
-torch.save(model, '/home/ubuntu/data/ecg-fitness_raw-v1.0/dlib/EVM-CNN.pth')
-
-for true_value, predicted_value in zip(targets_all_test, predictions_test):
-    print(f"True Value: {true_value}, Predicted Value: {predicted_value}")
-
-hr_original_list = []
-for item in test_dataset:
-    hr_original_list.append(item[2])
+    for value in targets_all:
+        denormalized_value = np.round(denormalize(value, max_for_denorm, min_for_denorm), 2)
+        denormalized_values_list_target.append(denormalized_value)
 
 
-plt.plot(hr_original_list, label='HR Original', marker='o')
-plt.plot(predictions_denormalized, label='Predictions', marker='x')
+mse = mean_squared_error(targets_all, predictions)
+rmse = np.sqrt(mse)
+
+print(f"Test RMSE: {rmse:.4f}, Test Loss: {test_loss:.2f}")
+
+torch.save(model, '/home/ubuntu/data/ecg-fitness_raw-v1.0/dlib/Model/EVMCNN.pth')
+print(f"Ground Truth:", denormalized_values_list_target)
+print("Prediction:", denormalized_values_list_pred)
+
+plt.plot(denormalized_values_list_target, label='HR Original', marker='o')
+plt.plot(denormalized_values_list_pred, label='Predictions', marker='x')
 plt.title('True vs Predicted Values')
-plt.xlabel('Original Index')
 plt.ylabel('Predictions')
 plt.legend()
-plt.savefig('/home/ubuntu/data/ecg-fitness_raw-v1.0/dlib/true_vs_predicted_EVMCNN.png')
+plt.xticks([])
+plt.savefig('/home/ubuntu/data/ecg-fitness_raw-v1.0/dlib/Plot/true_vs_predicted_EVMCNN.png')
 plt.close()
 
 plt.plot(train_loss_list, label='Train Loss')
@@ -619,21 +581,30 @@ plt.legend()
 plt.xlabel('Epoch')
 plt.ylabel('Loss')
 plt.title('Training and Validation Loss')
-plt.savefig('/home/ubuntu/data/ecg-fitness_raw-v1.0/dlib/train_val_loss_EVMCNN.png')
+plt.savefig('/home/ubuntu/data/ecg-fitness_raw-v1.0/dlib/Plot/train_val_loss_EVMCNN.png')
 plt.close()
 
-plt.plot(rmse_list, label='RMSE')
+
+plt.scatter(targets_all, predictions, alpha=0.5, label='Predictions', color='red')
+plt.scatter(targets_all, targets_all, alpha=0.5, label='Ground Truth', color='green')
+plt.title('Scatter Plot: Ground Truth vs Prediction')
+plt.xlabel('Ground Truth')
+plt.ylabel('Prediction')
+plt.savefig('/home/ubuntu/data/ecg-fitness_raw-v1.0/dlib/Plot/scatterplot_EVMCNN.png')
+plt.close()
+
+errors = np.array(denormalized_values_list_target) - np.array(denormalized_values_list_pred)
+plt.scatter(range(len(errors)), errors, alpha=0.5)
+plt.title('Error Plot: Prediction Error for Each Example')
+plt.xlabel('Image')
+plt.ylabel('Prediction Error')
+plt.savefig('/home/ubuntu/data/ecg-fitness_raw-v1.0/dlib/Plot/errorplot_EVMCNN.png')
+plt.close()
+
+plt.plot(rmse_list_val, label='RMSE')
 plt.legend()
 plt.xlabel('Epoch')
 plt.ylabel('RMSE')
 plt.title('Root Mean Squared Error (RMSE) on Validation Set')
-plt.savefig('/home/ubuntu/data/ecg-fitness_raw-v1.0/dlib/rmse_plot_EVMCNN.png')
-plt.close()
-
-plt.plot(me_rate_list, label='Mean Absolute Percentage Error')
-plt.legend()
-plt.xlabel('Epoch')
-plt.ylabel('Mean Absolute Percentage Error')
-plt.title('Mean Absolute Percentage Error on Validation Set')
-plt.savefig('/home/ubuntu/data/ecg-fitness_raw-v1.0/dlib/mape_plot_EVMCNN.png')
+plt.savefig('/home/ubuntu/data/ecg-fitness_raw-v1.0/dlib/Plot/rmse_val_plot_EVMCNN.png')
 plt.close()
