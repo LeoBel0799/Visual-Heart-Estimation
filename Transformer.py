@@ -231,7 +231,8 @@ def extract_face_region(image, landmarks):
 
         if len(face_region.shape) == 3:
             feature_image = cv2.resize(face_region, (200, 200))
-            feature_image = np.transpose(feature_image, (2, 0, 1))
+            feature_image = feature_image / 255.0
+            feature_image = np.moveaxis(feature_image, -1, 0)
         else:
             feature_image = cv2.resize(face_region, (200, 200))
             # feature_image_res = np.expand_dims(feature_image, axis=0)
@@ -335,7 +336,7 @@ def process_video(video_path, video_csv_path, face_detector, landmark_predictor,
     frame_rate = cap.get(cv2.CAP_PROP_FPS)
 
     # Limit the number of frames to analyze
-    max_time_to_analyze_seconds = 30  # Adjust the desired time duration in seconds
+    max_time_to_analyze_seconds = 60  # Adjust the desired time duration in seconds
     sampling_interval_ms = 10
 
     max_frames_to_analyze = int(max_time_to_analyze_seconds * frame_rate)
@@ -464,7 +465,7 @@ def denormalize(y, max_v, min_v):
 
 
 main_directory = "/home/ubuntu/data/ecg-fitness_raw-v1.0"
-video_to_process = 4
+video_to_process = 90
 dataset_path = "/home/ubuntu/data/ecg-fitness_raw-v1.0/dlib/Dataset/ViT.pth"
 final_dataset = process_and_create_dataset(main_directory, video_to_process)
 norm_dataset = []
