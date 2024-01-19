@@ -14,6 +14,8 @@ import torch
 import torchvision
 import torchvision.transforms as transforms
 from torch.autograd import Variable
+from sklearn.metrics import mean_absolute_error
+from scipy.stats import pearsonr
 from torch import nn
 import torch.nn.functional as F
 from torch.optim import AdamW
@@ -560,8 +562,15 @@ with torch.no_grad():
 
 mse = mean_squared_error(targets_all, predictions)
 rmse = np.sqrt(mse)
+mape = mean_absolute_error(targets_all, predictions)
+residuals = np.array(targets_all) - np.array(predictions)
+sde = np.std(residuals) # Calcolo della deviazione standard dell'errore
+correlation_coefficient, _ = pearsonr(targets_all, predictions)
 
-print(f"Test RMSE: {rmse:.4f}, Test Loss: {test_loss:.2f}")
+print(f"Test RMSE: {rmse:.4f}, Test Loss: {test_loss:.2f}, Test MAPE: {mape:.2f}")
+print(f"Standard Deviation of Error (SDe): {sde:.2f}")
+print(f"Pearson's Correlation Coefficient (Normalized): {correlation_coefficient:.4f}")
+
 
 torch.save(model, '/home/ubuntu/data/ecg-fitness_raw-v1.0/dlib/Model/EVMCNN.pth')
 print(f"Ground Truth:", denormalized_values_list_target)

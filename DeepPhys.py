@@ -2,6 +2,9 @@ import os
 import sys
 import time
 import ssl
+from sklearn.metrics import mean_absolute_error
+from scipy.stats import pearsonr
+
 import random
 from PIL import Image, ImageFilter
 import numpy as np
@@ -149,9 +152,7 @@ class DeepPhys(nn.Module):
 
         return out
 
-# Instantiate the model
 model = DeepPhys()
-# Print the model architecture
 print(model)
 
 
@@ -194,22 +195,114 @@ class CustomDatasetNormalized(Dataset):
         return img, hr_norm, hr_original
 
 
-def extract_face_region(image, face_box):
-    x, y, w, h = face_box.rect.left(), face_box.rect.top(), face_box.rect.width(), face_box.rect.height()
-    face_region = image[y:y+h, x:x+w]
+def extract_face_region(image, landmarks):
+    XLT = landmarks.part(14).x
+    YLT = max(landmarks.part(40).y, landmarks.part(41).y, landmarks.part(46).y, landmarks.part(47).y)
+    Wrect = landmarks.part(2).x - landmarks.part(14).x
+    Hrect = min(landmarks.part(50).y, landmarks.part(52).y) - YLT
 
-    if len(face_region.shape) == 3:
-        feature_image = cv2.resize(face_region, (36, 36))
-        feature_image = feature_image / 255.0
-        feature_image = np.moveaxis(feature_image, -1, 0)
+    XLT, YLT = int(XLT), int(YLT)
+    XRB, YRB = int(XLT + Wrect), int(YLT + Hrect)
+    center = (abs(XLT + XRB) / 2, abs(YLT + YRB) / 2)
+    size = (abs(XRB - XLT), abs(YRB - YLT))
+
+    if 0 <= XLT < image.shape[1] and 0 <= YLT < image.shape[0] and 0 <= XLT + Wrect <= image.shape[
+        1] and 0 <= YLT + Hrect <= image.shape[0]:
+        face_region = cv2.getRectSubPix(image, size, center)
+
+        if len(face_region.shape) == 3:
+            feature_image = cv2.resize(face_region, (200, 200))
+            feature_image = feature_image / 255.0
+            feature_image = np.moveaxis(feature_image, -1, 0)
+        else:
+            feature_image = cv2.resize(face_region, (200, 200))
+            # feature_image_res = np.expand_dims(feature_image, axis=0)
+
+        return feature_image
     else:
-        feature_image = cv2.resize(face_region, (36, 36))
-        # feature_image_res = np.expand_dims(feature_image, axis=0)
-
-    return feature_image
+        print("Region outside image limits.")
+        return None
 
 
-def process_video(video_path, video_csv_path, face_detector):
+def gaussian_pyramid(frame, level):
+    for _ in range(level - 1):
+        frame = cv2.pyrDown(frame)
+    return frame
+
+
+def reshape_to_one_column(frame):
+    return frame.reshape(-1, 1)
+
+
+def ideal_bandpass_filter(shape, Fl, Fh):
+    rows, cols = np.indices(shape)
+    center = (rows - shape[0] // 2, cols - shape[1] // 2)
+    distance = np.sqrt(center[0] ** 2 + center[1] ** 2)
+    mask = (distance >= Fl) & (distance <= Fh)
+    return mask.astype(float)
+
+
+def apply_bandpass_filter(image, Fl, Fh):
+    Mf = np.fft.fftshift(np.fft.fft2(image))
+
+    mask = ideal_bandpass_filter(image.shape, Fl, Fh)
+    N = Mf * mask
+    Ni = np.fft.ifft2(np.fft.ifftshift(N)).real
+
+    return Ni
+
+def extract_features(video_frames, Pl, Fps, Fl, Fh):
+     feature_images = []
+
+     while len(video_frames) >= Fps:
+         # Process Fps frames
+         intermediate_images = [
+             reshape_to_one_column(gaussian_pyramid(frame, Pl))
+             for frame in video_frames[:Fps]
+         ]
+         video_frames = video_frames[Fps:]
+
+         # Regola la dimensione lungo l'asse 0
+         min_rows = min(img.shape[0] for img in intermediate_images)
+         intermediate_images = [img[:min_rows, :] for img in intermediate_images]
+
+         # Concatenate columns
+         C = np.concatenate(intermediate_images, axis=1)
+
+         while C.shape[1] >= Fps:
+             # Applica il filtro passa-banda ed estrai le feature
+             if C.shape[1] >= 3:
+                 feature_image = apply_bandpass_filter(C[:, :Fps], Fl, Fh)
+
+                 # Rendi la feature image 25x25x3
+                 feature_image = cv2.resize(feature_image, (40, 40))
+                 # plt.imshow(feature_image)
+                 # plt.show()
+                 feature_image = np.expand_dims(feature_image, axis=-1)
+                 feature_image = np.concatenate([feature_image] * 3, axis=-1)
+
+                 # PyTorch vuole il formato CHW, quindi permuta gli assi
+                 feature_image = np.transpose(feature_image, (2, 0, 1))
+
+                 # Converti in tensore PyTorch
+                 feature_image_tensor = torch.from_numpy(feature_image).float()
+
+                 # Salva il tensore delle feature
+                 feature_images.append(feature_image_tensor)
+
+             # Rimuovi le colonne elaborate
+             C = C[:, Fps:]
+
+     return feature_images
+
+
+Pl = 4
+Fps = 30
+Fl = 0.75
+Fh = 4
+
+
+def process_video(video_path, video_csv_path, face_detector, landmark_predictor, tracker, Pl, Fps, Fl, Fh):
     # Initialize video capture
     cap = cv2.VideoCapture(video_path)
     if not cap.isOpened():
@@ -257,7 +350,8 @@ def process_video(video_path, video_csv_path, face_detector):
         face_region = extract_face_region(frame, landmarks)
         if face_region is not None:
             rois_list.append(face_region)
-
+            bbox = (face.rect.left(), face.rect.top(), face.rect.width(), face.rect.height())
+            tracker.init(frame, bbox)
 
 
         progress_bar.update(1)
@@ -265,9 +359,13 @@ def process_video(video_path, video_csv_path, face_detector):
 
     progress_bar.close()
     print(f"Video analyzed for {video_path}")
+    features_img = extract_features(rois_list, Pl, Fps, Fl, Fh)
+    video_images.extend(features_img)
+    print(f"Features extracted for {video_path}")
     current_dataset = CustomDataset(video_images,selected_rows)
 
     return current_dataset
+
 
 def process_and_create_dataset(main_directory, video_to_process):
     main_directories = [d for d in os.listdir(main_directory) if os.path.isdir(os.path.join(main_directory, d))]
@@ -306,8 +404,10 @@ def process_and_create_dataset(main_directory, video_to_process):
                     print(f"Error: No or multiple 'fin' CSV files found in {sub_dir_path}")
                     continue
 
+                tracker = cv2.TrackerGOTURN_create()
 
-                current_dataset = process_video(video_path, video_csv_path, face_detector)
+                current_dataset = process_video(video_path, video_csv_path, face_detector, landmark_predictor, tracker,
+                                                Pl, Fps, Fl, Fh)
 
                 if current_dataset is not None:
                     current_dataset_length = len(current_dataset)
@@ -323,6 +423,8 @@ def process_and_create_dataset(main_directory, video_to_process):
     print("Global custom dataset created with length: ", len(combined_dataset))
 
     return combined_dataset
+
+
 def normalize(custom_dataset, normalized_dataset):
     min_mean_hr = float('inf')
     max_mean_hr = float('-inf')
@@ -508,8 +610,15 @@ with torch.no_grad():
 
 mse = mean_squared_error(targets_all, predictions)
 rmse = np.sqrt(mse)
+mape = mean_absolute_error(targets_all, predictions)
+residuals = np.array(targets_all) - np.array(predictions)
+sde = np.std(residuals) # Calcolo della deviazione standard dell'errore
+correlation_coefficient, _ = pearsonr(targets_all, predictions)
 
-print(f"Test RMSE: {rmse:.4f}, Test Loss: {test_loss:.2f}")
+print(f"Test RMSE: {rmse:.4f}, Test Loss: {test_loss:.2f}, Test MAPE: {mape:.2f}")
+print(f"Standard Deviation of Error (SDe): {sde:.2f}")
+print(f"Pearson's Correlation Coefficient (Normalized): {correlation_coefficient:.4f}")
+
 
 torch.save(model, '/home/ubuntu/data/ecg-fitness_raw-v1.0/dlib/Model/DeepPhys.pth')
 print(f"Ground Truth:", denormalized_values_list_target)
