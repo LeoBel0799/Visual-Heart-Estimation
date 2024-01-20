@@ -67,7 +67,7 @@ class MyMSA(nn.Module):
         self.d = d
         self.n_heads = n_heads
 
-        assert d % n_heads == 0, f"Can't divide dimension {d} into {n_heads} heads"
+        assert d % n_heads == 0, f"[x] - E: Can't divide dimension {d} into {n_heads} heads"
 
         d_head = int(d / n_heads)
         self.q_mappings = nn.ModuleList(
@@ -134,8 +134,8 @@ class MyViT(nn.Module):
         self.n_heads = n_heads
 
 
-        assert chw[1] % n_patches == 0, "Input shape not entirely divisible by number of patches"
-        assert chw[2] % n_patches == 0, "Input shape not entirely divisible by number of patches"
+        assert chw[1] % n_patches == 0, "[x] - E: Input shape not entirely divisible by number of patches"
+        assert chw[2] % n_patches == 0, "[x] - E: Input shape not entirely divisible by number of patches"
         self.patch_size = (chw[1] // n_patches, chw[2] // n_patches)
 
         self.input_d = int(chw[0] * self.patch_size[0] * self.patch_size[1])
@@ -210,7 +210,7 @@ class CustomDatasetNormalized(Dataset):
             hr_norm = float(hr_norm)
             hr_original = float(hr_original)
         except ValueError:
-            raise ValueError(f"Errore: hr_norm o hr_original are not numbers in index: {idx}")
+            raise ValueError(f"[x] - E: hr_norm or hr_original are not numbers in index: {idx}")
 
 
         return img, hr_norm, hr_original
@@ -231,7 +231,10 @@ def extract_face_region(image, landmarks):
         1] and 0 <= YLT + Hrect <= image.shape[0]:
         face_region = cv2.getRectSubPix(image, size, center)
 
-        if len(face_region.shape) == 3:
+        if face_region is None:
+            return None
+
+        elif len(face_region.shape) == 3:
             feature_image = cv2.resize(face_region, (200, 200))
             feature_image = feature_image / 255.0
             feature_image = np.moveaxis(feature_image, -1, 0)
@@ -241,7 +244,7 @@ def extract_face_region(image, landmarks):
 
         return feature_image
     else:
-        print("Region outside image limits.")
+        print("[!] - W: Region outside image limits.")
         return None
 
 
@@ -327,7 +330,7 @@ def process_video(video_path, video_csv_path, face_detector, landmark_predictor,
     # Initialize video capture
     cap = cv2.VideoCapture(video_path)
     if not cap.isOpened():
-        print(f"Error opening video file: {video_path}")
+        print(f"[!] - W: Error opening video file: {video_path}")
         return
     rois_list = []
     ecg_data = pd.read_csv(video_csv_path, index_col='milliseconds')
@@ -373,16 +376,19 @@ def process_video(video_path, video_csv_path, face_detector, landmark_predictor,
             rois_list.append(face_region)
             bbox = (face.rect.left(), face.rect.top(), face.rect.width(), face.rect.height())
             tracker.init(frame, bbox)
-
+        else:
+            print("[!] - W: Issues with face region in current frame. Skipping...")
+            frame_count += 1
+            continue
 
         progress_bar.update(1)
         frame_count += 1
 
     progress_bar.close()
-    print(f"Video analyzed for {video_path}")
+    print(f"[+] - OK: Video analyzed for {video_path}")
     features_img = extract_features(rois_list, Pl, Fps, Fl, Fh)
     video_images.extend(features_img)
-    print(f"Features extracted for {video_path}")
+    print(f"[+] - OK: Features extracted for {video_path}")
     current_dataset = CustomDataset(video_images,selected_rows)
 
     return current_dataset
@@ -414,15 +420,19 @@ def process_and_create_dataset(main_directory, video_to_process):
                 fin_csv_files = [f for f in os.listdir(sub_dir_path) if f.startswith("ecg") and f.endswith(".csv")]
                 for csv_file in fin_csv_files:
                     file_path = os.path.join(sub_dir_path, csv_file)
-                    df = pd.read_csv(file_path)
-                    df = df[df[' ECG HR'] >= 0]
-                    df.to_csv(file_path, index=False)
+                    try:
+                        df = pd.read_csv(file_path)
+                        df = df[df[' ECG HR'] >= 0]
+                        df.to_csv(file_path, index=False)
+                    except pd.errors.EmptyDataError:
+                        print(f"[!] - W: '{file_path}' is empty. Skipping...")
+                        continue
 
                 if len(fin_csv_files) == 1:
                     fin_csv_file = fin_csv_files[0]
                     video_csv_path = os.path.join(sub_dir_path, fin_csv_file)
                 else:
-                    print(f"Error: No or multiple 'fin' CSV files found in {sub_dir_path}")
+                    print(f"[x] - E: No or multiple 'fin' CSV files found in {sub_dir_path}")
                     continue
 
                 tracker = cv2.TrackerGOTURN_create()
@@ -433,15 +443,15 @@ def process_and_create_dataset(main_directory, video_to_process):
                 if current_dataset is not None:
                     current_dataset_length = len(current_dataset)
                     all_datasets.append(current_dataset)
-                    print(f"All datasets len: {len(all_datasets)}")
-                    print(f"CustomDataset created for {video_path} with {current_dataset_length} rows")
+                    print(f"[INFO] - All datasets len: {len(all_datasets)}")
+                    print(f"[INFO] - CustomDataset created for {video_path} with {current_dataset_length} rows")
                     processed_videos += 1
                 else:
-                    print(f"Skipping video {video_path} due to processing error.")
+                    print(f"[!] - W: Skipping video {video_path} due to processing error.")
 
     combined_dataset = ConcatDataset(all_datasets)
 
-    print("Global custom dataset created with length: ", len(combined_dataset))
+    print("[INFO] - Global custom dataset created with length: ", len(combined_dataset))
 
     return combined_dataset
 
@@ -475,9 +485,9 @@ normalized_dataset, min_for_denorm, max_for_denorm = normalize(final_dataset, no
 
 
 torch.save(normalized_dataset, dataset_path)
-print("Global custom dataset saved!")
+print("[INFO] -Global custom dataset saved!")
 loaded_dataset = torch.load(dataset_path)
-print("Global custom dataset loaded...!")
+print("[INFO] -Global custom dataset loaded...!")
 
 train_size = int(0.8 * len(loaded_dataset))
 val_size = int(0.1 * len(loaded_dataset))
@@ -493,13 +503,13 @@ test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False, pin
 
 
 total_samples_in_train_loader = len(train_loader.dataset)
-print(f"Total number of samples in train_loader: {total_samples_in_train_loader}")
+print(f"[INFO] - Total number of samples in train_loader: {total_samples_in_train_loader}")
 
 total_samples_in_val_loader = len(val_loader.dataset)
-print(f"Total number of samples in val_loader: {total_samples_in_val_loader}")
+print(f"[INFO] - Total number of samples in val_loader: {total_samples_in_val_loader}")
 
 total_samples_in_test_loader = len(test_loader.dataset)
-print(f"Total number of samples in test_loader: {total_samples_in_test_loader}")
+print(f"[INFO] - Total number of samples in test_loader: {total_samples_in_test_loader}")
 
 
 N_EPOCHS = 50
@@ -523,7 +533,7 @@ def objective(trial, train, val):
     hidden_d = trial.suggest_categorical('hidden_d', [4,8,12])
     n_blocks = trial.suggest_int('n_block', 2,8)
 
-    print(f"Trying parameters: patch_size={n_patches}, heads={n_heads}, hidden_d={hidden_d}, n_blocks={n_blocks}")
+    print(f"[INFO] - Trying parameters: patch_size={n_patches}, heads={n_heads}, hidden_d={hidden_d}, n_blocks={n_blocks}")
 
 
     model = MyViT((3,40,40), n_patches=n_patches, n_blocks=n_blocks, hidden_d=hidden_d,n_heads=n_heads)
@@ -607,7 +617,7 @@ study = optuna.create_study(direction='minimize')
 study.optimize(lambda trial: objective(trial, train_loader, val_loader), n_trials=3)
 
 best_params = study.best_params
-print("Best Hyperparameters:", best_params)
+print("[INFO] - Best Hyperparameters:", best_params)
 
 best_patch_size = best_params['n_patches']
 best_heads = best_params['n_heads']
@@ -754,13 +764,16 @@ residuals = np.array(targets_all) - np.array(predictions)
 sde = np.std(residuals) # Calcolo della deviazione standard dell'errore
 correlation_coefficient, _ = pearsonr(targets_all, predictions)
 
+print("\n--------------------------TEST METRICS--------------------------------\n")
 print(f"Test RMSE: {rmse:.4f}, Test Loss: {test_loss:.2f}, Test MAPE: {mape:.2f}")
 print(f"Standard Deviation of Error (SDe): {sde:.2f}")
 print(f"Pearson's Correlation Coefficient (Normalized): {correlation_coefficient:.4f}")
 
-torch.save(best_model, '/home/ubuntu/data/ecg-fitness_raw-v1.0/dlib/Model/VIT.pth')
-print(f"Ground Truth:", denormalized_values_list_target)
-print("Prediction:", denormalized_values_list_pred)
+
+torch.save(best_model, '/home/ubuntu/data/ecg-fitness_raw-v1.0/dlib/Model/DeepPhys.pth')
+print(f"\nGround Truth:", denormalized_values_list_target)
+print("\nPrediction:", denormalized_values_list_pred)
+
 
 plt.plot(denormalized_values_list_target, label='HR Original', marker='o')
 plt.plot(denormalized_values_list_pred, label='Predictions', marker='x')
