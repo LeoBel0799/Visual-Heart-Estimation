@@ -275,8 +275,8 @@ def extract_features(video_frames, Pl, Fps, Fl, Fh):
              if C.shape[1] >= 3:
                  feature_image = apply_bandpass_filter(C[:, :Fps], Fl, Fh)
 
-                 # Rendi la feature image 25x25x3
-                 feature_image = cv2.resize(feature_image, (40, 40))
+                 # Rendi la feature image
+                 feature_image = cv2.resize(feature_image, (36, 36))
                  # plt.imshow(feature_image)
                  # plt.show()
                  feature_image = np.expand_dims(feature_image, axis=-1)
@@ -620,11 +620,9 @@ rmse = np.sqrt(mse)
 mape = mean_absolute_error(targets_all, predictions)
 residuals = np.array(targets_all) - np.array(predictions)
 sde = np.std(residuals) # Calcolo della deviazione standard dell'errore
-correlation_coefficient, _ = pearsonr(targets_all, predictions)
 print("\n--------------------------TEST METRICS--------------------------------\n")
 print(f"Test RMSE: {rmse:.4f}, Test Loss: {test_loss:.2f}, Test MAPE: {mape:.2f}")
 print(f"Standard Deviation of Error (SDe): {sde:.2f}")
-print(f"Pearson's Correlation Coefficient (Normalized): {correlation_coefficient:.4f}")
 
 
 torch.save(model, '/home/ubuntu/data/ecg-fitness_raw-v1.0/dlib/Model/DeepPhys.pth')
