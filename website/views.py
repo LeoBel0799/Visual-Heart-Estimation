@@ -1,9 +1,12 @@
-from flask import Blueprint, render_template
+from flask import Response, Blueprint, render_template, send_file, jsonify
 from flask_login import login_required, current_user
 from flask import Blueprint, flash, render_template, request, redirect, url_for
 from werkzeug.utils import secure_filename
 import os
+import base64
+
 from .models import db,Video
+from sqlalchemy import desc
 
 views = Blueprint('views',__name__)
 
@@ -39,8 +42,8 @@ def allowed_file(filename):
     # Puoi restituire il video elaborato o eseguire altre azioni a seconda delle tue esigenze
     #return processed_video_path  # o processed_video_data se hai eseguito un'elaborazione specifica
 
-@views.route('/upload', methods=['POST'])
-def upload():
+@views.route('/choose_video', methods=['POST'])
+def choose_video():
     video_verified = False
 
     if 'video' not in request.files:
@@ -54,7 +57,6 @@ def upload():
         return redirect(url_for('views.home'))
 
     if video and allowed_file(video.filename):
-
         filename = secure_filename(video.filename)
         upload_folder = 'static/videos'
         os.makedirs(upload_folder, exist_ok=True)
@@ -66,18 +68,26 @@ def upload():
         db.session.add(new_video)
         db.session.commit()
 
-        flash('Video uploaded successfully!', category='success')
+        flash('Video verified ad uploaded successfully!', category='success')
         video_verified = True
 
-        # if video_verified:
-        #     pipeline(video_data)
     else:
         flash('File in the wrong format. Only mp4 allowed!', category='error')
 
     return redirect(url_for('views.home'))
 
 
+def index():
+    last_video = Video.query.order_by(Video.id.desc()).first()
+    return last_video.id if last_video else None
 
 
-
-
+@views.route('/get_video', methods=['GET'])
+def get_video():
+    video = Video.query.get(index())
+    if video:
+        video_data = video.video_data
+        response = Response(video_data, content_type='video/mp4')
+        return response
+    else:
+        return jsonify({'message': 'Video non trovato'}), 404

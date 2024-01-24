@@ -100,16 +100,32 @@
     </style>
 </head>
 
-<form action="{{ url_for('views.upload') }}" method="POST" enctype="multipart/form-data">
+
+<form action = "{{ url_for('views.choose_video') }}" method="POST" enctype="multipart/form-data">
     <div class="buttons-container">
         <div class="custom-file-input-wrapper">
-            <input type="file" name="video" accept=".mp4" class="custom-file-input">
+            <input type="file" name="video" accept=".mp4" class="custom-file-input" id="videoInput">
             <div class="custom-file-button">Scegli file</div>
         </div>
-        <div class="upload-btn-wrapper">
-            <button type="submit" class="upload-btn btn btn-primary">Upload</button>
+    </div>
+
+    <div class="buttons-container">
+            <div class="upload-btn-wrapper">
+                <button type="submit" class="upload-btn btn btn-primary">Verify</button>
+            </div>
+    </div>
+
+</form>
+
+
+<form action="{{ url_for('views.get_video') }}" method="GET" enctype="multipart/form-data">
+        <div class="buttons-container">
+            <div class="upload-btn-wrapper">
+                <button type="submit" class="upload-btn btn btn-primary">Upload last video</button>
+            </div>
         </div>
     </div>
 </form>
+
 {% endblock %}
 </html>
