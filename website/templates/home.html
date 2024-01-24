@@ -1,6 +1,115 @@
 <!DOCTYPE html>
-<html>
-    {% extends "base.html" %}
-    {% block title %}Home{% endblock %}
-</html>
+<html lang="en">
+{% extends "base.html" %} {% block title %}Home{% endblock %} {% block content
+%}
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.4.1/css/bootstrap.min.css"
+        integrity="sha384-Vkoo8x4CGsO3+Hhxv8T/Q5PaXtkKtu6ug5TOeNV6gBiFeWPGFN9MuhOf23Q9Ifjh"
+        crossorigin="anonymous" />
+    <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/font-awesome/4.7.0/css/font-awesome.min.css"
+        crossorigin="anonymous" />
 
+    <!-- Aggiungi questo blocco di codice per lo stile della verification-box -->
+    <style>
+        .verification-box {
+            background-color: #5cb85c; /* Colore verde */
+            color: #ffffff; /* Colore del testo bianco */
+            padding: 10px;
+            margin-top: 10px;
+            border-radius: 5px;
+        }
+
+        .tick-mark {
+            font-size: 20px;
+            margin-right: 5px;
+        }
+    </style>
+</head>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+        }
+
+        .buttons-container {
+            display: flex;
+            justify-content: flex-start; /* Allinea a sinistra */
+            align-items: center;
+            padding: 20px;
+        }
+
+        .custom-file-input-wrapper,
+        .upload-btn-wrapper {
+            position: relative;
+            overflow: hidden;
+            display: inline-block;
+            vertical-align: top;
+            margin-right: 20px; /* Aggiunto margine per separare i pulsanti */
+        }
+
+        .custom-file-input,
+        .upload-btn-wrapper input[type=file] {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            cursor: pointer;
+            opacity: 0;
+        }
+
+        .custom-file-button,
+        .upload-btn-wrapper .upload-btn {
+            display: inline-block;
+            padding: 8px 16px;
+            font-size: 14px;
+            text-align: center;
+            text-decoration: none;
+            cursor: pointer;
+            border: 1px solid #007bff;
+            border-radius: 4px;
+            background-color: #007bff;
+            color: #fff;
+            transition: background-color 0.3s ease;
+            z-index: 1;
+        }
+
+        .custom-file-button:hover,
+        .upload-btn-wrapper .upload-btn:hover {
+            background-color: #0056b3;
+        }
+
+        .home-box {
+            flex-grow: 1;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background-color: #f0f0f0;
+        }
+
+        .box-text {
+            text-align: center;
+            font-size: 18px;
+            color: #333;
+        }
+    </style>
+</head>
+
+<form action="{{ url_for('views.upload') }}" method="POST" enctype="multipart/form-data">
+    <div class="buttons-container">
+        <div class="custom-file-input-wrapper">
+            <input type="file" name="video" accept=".mp4" class="custom-file-input">
+            <div class="custom-file-button">Scegli file</div>
+        </div>
+        <div class="upload-btn-wrapper">
+            <button type="submit" class="upload-btn btn btn-primary">Upload</button>
+        </div>
+    </div>
+</form>
+{% endblock %}
+</html>
