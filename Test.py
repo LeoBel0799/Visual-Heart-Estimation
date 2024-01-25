@@ -183,7 +183,7 @@ def process_and_visualize_video(video_path, face_detector, landmark_predictor, t
         if not ret or frame_count >= max_frames_to_analyze:
             break
 
-        if frame_count % 10 == 0:
+        if frame_count % 60 == 0:
             faces = face_detector(frame, 1)
 
         if not faces:
