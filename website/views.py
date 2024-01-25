@@ -20,31 +20,13 @@ ALLOWED_EXT = ['mp4']
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.',1)[1].lower() in ALLOWED_EXT
 
-#def pipeline(video_data):
-    # Esegui le operazioni desiderate sulla video_data
-    # Ad esempio, puoi utilizzare librerie come OpenCV per elaborare il video
-    # o eseguire altre operazioni personalizzate.
+def pipeline(video_data):
+    #INSERIRE LA LOGICA PRESENTE IN Test.py
+    return
 
-    # # Esempio: Salva il video elaborato su disco
-    # processed_video_path = 'static/processed_videos/film.mp4'
-    # with open(processed_video_path, 'wb') as processed_file:
-    #     processed_file.write(video_data)
-
-    # Esempio: Esegui qualche operazione con OpenCV (richiede l'installazione di OpenCV)
-    # import cv2
-    # video_array = bytearray(video_data)
-    # frame = cv2.imdecode(np.array(video_array), cv2.IMREAD_UNCHANGED)
-    # # Esegui operazioni di elaborazione del frame
-    # # ...
-    # processed_frame = frame
-    # processed_video_data = cv2.imencode('.mp4', processed_frame)[1].tobytes()
-
-    # Puoi restituire il video elaborato o eseguire altre azioni a seconda delle tue esigenze
-    #return processed_video_path  # o processed_video_data se hai eseguito un'elaborazione specifica
 
 @views.route('/choose_video', methods=['POST'])
 def choose_video():
-    video_verified = False
 
     if 'video' not in request.files:
         flash('No video file found!', category='error')
@@ -69,7 +51,6 @@ def choose_video():
         db.session.commit()
 
         flash('Video verified ad uploaded successfully!', category='success')
-        video_verified = True
 
     else:
         flash('File in the wrong format. Only mp4 allowed!', category='error')
@@ -87,7 +68,10 @@ def get_video():
     video = Video.query.get(index())
     if video:
         video_data = video.video_data
+        pipeline(video_data)
+
         response = Response(video_data, content_type='video/mp4')
         return response
     else:
-        return jsonify({'message': 'Video non trovato'}), 404
+        flash('No video file found!', category='error')
+        return redirect(url_for('views.home'))
