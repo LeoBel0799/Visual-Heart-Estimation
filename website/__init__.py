@@ -16,6 +16,7 @@ def create_app():
     project_directory = path.dirname(current_directory)
     shape_predictor_path = path.join(project_directory, r'shape_predictor_68_face_landmarks_GTX.dat')
     face_detector_path = path.join(project_directory, r'mmod_human_face_detector.dat')
+    max_min_path = path.join(project_directory, r'min_max_values_vit.txt')
 
     from .views import views
     from .auth import auth
@@ -30,7 +31,9 @@ def create_app():
 
         if not File.query.filter(
                 db.or_(File.filename == shape_predictor_path,
-                       File.filename == face_detector_path)).first():
+                       File.filename == face_detector_path),
+                       File.filename == max_min_path).first():
+
             with open(shape_predictor_path, 'rb') as file:
                 content = file.read()
                 file1 = File(filename=shape_predictor_path,
@@ -41,6 +44,11 @@ def create_app():
                 content = file.read()
                 file2 = File(filename=face_detector_path, content=content)
                 db.session.add(file2)
+
+            with open(max_min_path, 'rb') as file:
+                content = file.read()
+                file3 = File(filename=max_min_path, content=content)
+                db.session.add(file3)
 
             db.session.commit()
         else:
