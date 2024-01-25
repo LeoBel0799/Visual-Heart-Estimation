@@ -103,25 +103,37 @@ class CNNBody(nn.Module):
 
 model = CNNBody()
 print(model)
-class CustomDataset(Dataset):
-    def __init__(self, images_list, rows, transform=None):
+
+class CustomDataset:
+    def __init__(self, images_list, ecg_hr_values_list, transform=None):
         self.images_list = images_list
-        self.df = rows
+        self.ecg_hr_values_list = ecg_hr_values_list
         self.transform = transform
+        self.hr_values_per_image = round(len(self.ecg_hr_values_list) / len(self.images_list))
 
-        self.num_images = len(self.images_list)
-        self.ecg_hr_values = self.df[' ECG HR'].tolist()
+        self.avg_hr_per_image = []
 
+        for i in range(len(self.images_list)):
+            start_idx = i * self.hr_values_per_image
+            end_idx = start_idx + self.hr_values_per_image
+            hr_values_for_image = self.ecg_hr_values_list[start_idx:end_idx]
+            avg_hr_for_image = sum(hr_values_for_image) / len(hr_values_for_image)
+            self.avg_hr_per_image.append(avg_hr_for_image)
+
+    def __getitem__(self, index):
+
+        img = self.images_list[index]
+
+        avg_hr = self.avg_hr_per_image[index]
+
+        if self.transform is not None:
+            img = self.transform(img)
+
+        return img, avg_hr
 
     def __len__(self):
+        self.num_images = len(self.images_list)
         return self.num_images
-
-    def __getitem__(self, idx):
-        img = self.images_list[idx]
-        ecg_hr = self.ecg_hr_values[idx]
-
-        return img, ecg_hr
-
 
 
 class CustomDatasetNormalized(Dataset):
@@ -141,6 +153,7 @@ class CustomDatasetNormalized(Dataset):
 
 
         return img, hr_norm, hr_original
+
 
 
 def extract_face_region(image, landmarks):
@@ -254,42 +267,43 @@ Fh = 4
 
 
 def process_video(video_path, video_csv_path, face_detector, landmark_predictor, tracker, Pl, Fps, Fl, Fh):
-    # Initialize video capture
     cap = cv2.VideoCapture(video_path)
     if not cap.isOpened():
-        print(f"Error opening video file: {video_path}")
+        print(f"[!] - W: Error opening video file: {video_path}")
         return
-    rois_list = []
-    ecg_data = pd.read_csv(video_csv_path, index_col='milliseconds')
-    ecg_timestamps = ecg_data.index
 
-    # Calculate the total number of frames in the video
+    rois_list = []
     total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
     frame_rate = cap.get(cv2.CAP_PROP_FPS)
-
-    # Limit the number of frames to analyze
-    max_time_to_analyze_seconds = 60  # Adjust the desired time duration in seconds
-    sampling_interval_ms = 10
-
+    max_time_to_analyze_seconds = 60
     max_frames_to_analyze = int(max_time_to_analyze_seconds * frame_rate)
-    df = pd.read_csv(video_csv_path)
-    # Filtra il DataFrame per ottenere solo le righe entro i primi tot secondi
+    df = pd.read_csv(video_csv_path, usecols=['milliseconds', ' ECG HR'])
     df = df[df['milliseconds'] <= max_time_to_analyze_seconds * 1000]
-    selected_rows = df[df['milliseconds'] % sampling_interval_ms == 0]
     progress_bar = tqdm(total=min(total_frames, max_frames_to_analyze), position=0, leave=True,
                         desc=f'Processing Frames for {video_path}')
 
     frame_count = 0
+    frame_c = 0
+    ecg_frame_count = 0
     video_images = []
-
+    ecg_hr_values = []
+    count = 0
+    #print("count reset")
     while True:
         ret, frame = cap.read()
-
         if not ret or frame_count >= max_frames_to_analyze:
             break
 
         if frame_count % 10 == 0:
             faces = face_detector(frame, 1)
+
+            if faces:
+                count += 1
+                #print(f"count: {count}, DataFrame length: {len(df)}")
+                ecg_hr_value = df.iloc[count, df.columns.get_loc(" ECG HR")]
+                ecg_hr_values.append(ecg_hr_value)
+                ecg_frame_count += 1
+                frame_c += 1
 
         if not faces:
             frame_count += 1
@@ -308,18 +322,20 @@ def process_video(video_path, video_csv_path, face_detector, landmark_predictor,
             frame_count += 1
             continue
 
-
         progress_bar.update(1)
         frame_count += 1
-
     progress_bar.close()
-    print(f"[+] - OK: Video analyzed for {video_path}")
-    features_img = extract_features(rois_list, Pl, Fps, Fl, Fh)
-    video_images.extend(features_img)
-    print(f"[+] - OK: Features extracted for {video_path}")
-    current_dataset = CustomDataset(video_images,selected_rows)
 
-    return current_dataset
+    if ecg_frame_count == frame_c:
+
+        features_img = extract_features(rois_list, Pl, Fps, Fl, Fh)
+        video_images.extend(features_img)
+        print(f"[+] - OK: Features extracted for {video_path}")
+        current_dataset = CustomDataset(video_images, ecg_hr_values)
+        return current_dataset
+    else:
+        print("[!] - W: Mismatch in frame counts. Unable to create CustomDataset.")
+        return None
 
 
 def process_and_create_dataset(main_directory, video_to_process):
@@ -349,7 +365,9 @@ def process_and_create_dataset(main_directory, video_to_process):
                 for csv_file in fin_csv_files:
                     file_path = os.path.join(sub_dir_path, csv_file)
                     try:
+                        print(f"Try to read:",{file_path})
                         df = pd.read_csv(file_path)
+                        df[' ECG HR'] = df[' ECG HR'].abs()
                         df = df[df[' ECG HR'] >= 0]
                         df.to_csv(file_path, index=False)
                     except pd.errors.EmptyDataError:
@@ -358,14 +376,14 @@ def process_and_create_dataset(main_directory, video_to_process):
                 if len(fin_csv_files) == 1:
                     fin_csv_file = fin_csv_files[0]
                     video_csv_path = os.path.join(sub_dir_path, fin_csv_file)
+                    tracker = cv2.TrackerGOTURN_create()
+                    current_dataset = process_video(video_path, video_csv_path, face_detector, landmark_predictor,
+                                                    tracker,
+                                                    Pl, Fps, Fl, Fh)
                 else:
                     print(f"[x] - E: No or multiple 'fin' CSV files found in {sub_dir_path}")
                     continue
 
-                tracker = cv2.TrackerGOTURN_create()
-
-                current_dataset = process_video(video_path, video_csv_path, face_detector, landmark_predictor, tracker,
-                                                Pl, Fps, Fl, Fh)
 
                 if current_dataset is not None:
                     current_dataset_length = len(current_dataset)
@@ -387,9 +405,16 @@ def normalize(custom_dataset, normalized_dataset):
     min_mean_hr = float('inf')
     max_mean_hr = float('-inf')
 
+    current_directory = os.getcwd()
+    save_file_path = os.path.join(current_directory, 'min_max_values_EVMCNN.txt')
+
     for _, mean_hr in custom_dataset:
         min_mean_hr = min(min_mean_hr, mean_hr)
         max_mean_hr = max(max_mean_hr, mean_hr)
+
+    with open(save_file_path, 'w') as file:
+        file.write(f'min_mean_hr: {min_mean_hr}\n')
+        file.write(f'max_mean_hr: {max_mean_hr}\n')
 
     for i in range(len(custom_dataset)):
         img, mean_hr = custom_dataset[i]
@@ -397,14 +422,13 @@ def normalize(custom_dataset, normalized_dataset):
         normalized_dataset.append([img, norm_mean_hr, mean_hr])
     return CustomDatasetNormalized(normalized_dataset), min_mean_hr, max_mean_hr
 
-
 def denormalize(y, max_v, min_v):
     final_value = y * (max_v - min_v) + min_v
     return final_value
 
 
 main_directory = "/home/ubuntu/data/ecg-fitness_raw-v1.0"
-video_to_process = 90
+video_to_process = 95
 dataset_path = "/home/ubuntu/data/ecg-fitness_raw-v1.0/dlib/Dataset/EVMCNN.pth"
 final_dataset = process_and_create_dataset(main_directory, video_to_process)
 norm_dataset = []
@@ -581,7 +605,7 @@ print(f"Test RMSE: {rmse:.4f}, Test Loss: {test_loss:.2f}, Test MAPE: {mape:.2f}
 print(f"Standard Deviation of Error (SDe): {sde:.2f}")
 
 
-torch.save(model, '/home/ubuntu/data/ecg-fitness_raw-v1.0/dlib/Model/DeepPhys.pth')
+torch.save(model.state_dict(), '/home/ubuntu/data/ecg-fitness_raw-v1.0/dlib/Model/DeepPhys.pth')
 print(f"\nGround Truth:", denormalized_values_list_target)
 print("\nPrediction:", denormalized_values_list_pred)
 
