@@ -4,14 +4,17 @@ import cv2
 import dlib
 import numpy as np
 import tqdm
+from Transformer import denormalize
+
 
 model = Transformer.ViT()
-model.load_state_dict(torch.load('/home/ubuntu/data/ecg-fitness_raw-v1.0/dlib/Model/DeepPhys.pth'))
+model.load_state_dict(torch.load(r'F:\Università\Thesis\VIT.py'))
 model.eval()
 
-video_path = r'F:\Università\Thesis\static\videos\Leonardo_Bellizzi_matr._684612-filmato.mp4'
+video_path = r'/static/videos/film.mp4'
 face_detector = r'F:\Università\Thesis\mmod_human_face_detector.dat'
 landmark_predictor = r'F:\Università\Thesis\shape_predictor_68_face_landmarks_GTX.dat'
+file_path = r'F:\Università\Thesis\min_max_values.txt'
 
 face_detector = dlib.cnn_face_detection_model_v1(face_detector)
 landmark_predictor = dlib.shape_predictor(landmark_predictor)
@@ -19,7 +22,25 @@ Pl = 4
 Fps = 30
 Fl = 0.75
 Fh = 4
-max_time_to_analyze_seconds = 60
+
+
+
+with open(file_path, 'r') as file:
+    lines = file.readlines()
+
+for line in lines:
+    key, value = line.strip().split(': ')
+    if key == 'min_mean_hr':
+        min_mean_hr = float(value)
+    elif key == 'max_mean_hr':
+        max_mean_hr = float(value)
+
+
+
+def denormalize(y, max_v, min_v):
+    final_value = y * (max_v - min_v) + min_v
+    return final_value
+
 
 def extract_face_region(image, landmarks):
     XLT = landmarks.part(14).x
@@ -194,7 +215,8 @@ def process_and_visualize_video(video_path, face_detector, landmark_predictor, t
         with torch.no_grad():
             output = model(image)
         predicted_value = output.item()
-        annotated_frame = draw_annotations(frame.copy(), face, predicted_value)
+        pred_denorm = denormalize(predicted_value,max_mean_hr,min_mean_hr)
+        annotated_frame = draw_annotations(frame.copy(), face, pred_denorm)
         out.write(annotated_frame)
         frame_count += 1
 
@@ -206,5 +228,5 @@ def process_and_visualize_video(video_path, face_detector, landmark_predictor, t
 
 
 tracker = cv2.TrackerGOTURN_create()
-process_and_visualize_video(video_path, face_detector, landmark_predictor, tracker, Pl, Fps, Fl, Fh, max_time_to_analyze_seconds, model)
+process_and_visualize_video(video_path, face_detector, landmark_predictor, tracker, Pl, Fps, Fl, Fh, model)
 
