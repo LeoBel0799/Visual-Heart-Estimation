@@ -252,7 +252,8 @@ def extract_face_region(image, landmarks):
             feature_image = np.moveaxis(feature_image, -1, 0)
         else:
             feature_image = cv2.resize(face_region, (200, 200))
-            # feature_image_res = np.expand_dims(feature_image, axis=0)
+            feature_image = feature_image / 255.0
+            feature_image = np.expand_dims(feature_image, axis=0)
 
         return feature_image
     else:
@@ -310,7 +311,7 @@ def extract_features(video_frames, Pl, Fps, Fl, Fh):
                  feature_image = apply_bandpass_filter(C[:, :Fps], Fl, Fh)
 
                  # Rendi la feature image
-                 feature_image = cv2.resize(feature_image, (36, 36))
+                 feature_image = cv2.resize(feature_image, (40, 40))
                  # plt.imshow(feature_image)
                  # plt.show()
                  feature_image = np.expand_dims(feature_image, axis=-1)
@@ -365,8 +366,10 @@ def process_video(video_path, video_csv_path, face_detector, landmark_predictor,
         if not ret or frame_count >= max_frames_to_analyze:
             break
 
+        gray_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+
         if frame_count % 10 == 0:
-            faces = face_detector(frame, 1)
+            faces = face_detector(gray_frame, 1)
 
             if faces:
                 count += 1
@@ -381,9 +384,9 @@ def process_video(video_path, video_csv_path, face_detector, landmark_predictor,
             continue
 
         face = faces[0]
-        landmarks = landmark_predictor(frame, face.rect)
+        landmarks = landmark_predictor(gray_frame, face.rect)
 
-        face_region = extract_face_region(frame, landmarks)
+        face_region = extract_face_region(gray_frame, landmarks)
         if face_region is not None:
             rois_list.append(face_region)
             bbox = (face.rect.left(), face.rect.top(), face.rect.width(), face.rect.height())
