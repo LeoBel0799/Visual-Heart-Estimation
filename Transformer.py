@@ -554,10 +554,10 @@ criterion = nn.MSELoss()
 def objective(trial, train, val):
     best_val_rmse = float('inf')
     val_loss_list = []
-    n_patches = trial.suggest_categorical('n_patches', [1, 2, 4, 8])
+    n_patches = trial.suggest_categorical('n_patches', [8, 12, 16, 24, 32])
     n_heads = trial.suggest_categorical('n_heads', [1,2,4])
-    hidden_d = trial.suggest_categorical('hidden_d', [4,8,12])
-    n_blocks = trial.suggest_int('n_block', 2,8)
+    hidden_d = trial.suggest_categorical('hidden_d', [8,16,24,32,64])
+    n_blocks = trial.suggest_int('n_block', [2,4,8])
 
     print(f"[INFO] - Trying parameters: patch_size={n_patches}, heads={n_heads}, hidden_d={hidden_d}, n_blocks={n_blocks}")
 
@@ -568,7 +568,7 @@ def objective(trial, train, val):
     optimizer = AdamW(model.parameters(), lr=LR, weight_decay=WD)
     criterion = nn.MSELoss()
 
-    N_EPOCHS = 5
+    N_EPOCHS = 20
     for epoch in range(N_EPOCHS):
         model.train()
         train_loss = 0.0
@@ -640,7 +640,7 @@ def objective(trial, train, val):
     return rmse_validation
 
 study = optuna.create_study(direction='minimize')
-study.optimize(lambda trial: objective(trial, train_loader, val_loader), n_trials=3)
+study.optimize(lambda trial: objective(trial, train_loader, val_loader), n_trials=10)
 
 best_params = study.best_params
 print("[INFO] - Best Hyperparameters:", best_params)

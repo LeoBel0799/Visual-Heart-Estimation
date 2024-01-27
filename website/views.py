@@ -39,17 +39,20 @@ def choose_video():
         return redirect(url_for('views.home'))
 
     if video and allowed_file(video.filename):
-        filename = secure_filename(video.filename)
-        upload_folder = 'static/videos'
-        os.makedirs(upload_folder, exist_ok=True)
-        video_path = os.path.join(upload_folder, filename)
-        video.save(video_path)
-        with open(video_path, 'rb') as file:
-            video_data = file.read()
+        video_data = video.read()
         new_video = Video(video_data=video_data)
         db.session.add(new_video)
         db.session.commit()
-
+        # filename = secure_filename(video.filename)
+        # upload_folder = 'static/videos'
+        # os.makedirs(upload_folder, exist_ok=True)
+        # video_path = os.path.join(upload_folder, filename)
+        # video.save(video_path)
+        # with open(video_path, 'rb') as file:
+        #     video_data = file.read()
+        # new_video = Video(video_data=video_data)
+        # db.session.add(new_video)
+        # db.session.commit()
         flash('Video verified ad uploaded successfully!', category='success')
 
     else:
@@ -69,7 +72,6 @@ def get_video():
     if video:
         video_data = video.video_data
         pipeline(video_data)
-
         response = Response(video_data, content_type='video/mp4')
         return response
     else:
