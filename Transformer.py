@@ -557,7 +557,7 @@ def objective(trial, train, val):
     n_patches = trial.suggest_categorical('n_patches', [8, 12, 16, 24, 32])
     n_heads = trial.suggest_categorical('n_heads', [1,2,4])
     hidden_d = trial.suggest_categorical('hidden_d', [8,16,24,32,64])
-    n_blocks = trial.suggest_int('n_block', [2,4,8])
+    n_blocks = trial.suggest_categorical('n_block', [2,4,8])
 
     print(f"[INFO] - Trying parameters: patch_size={n_patches}, heads={n_heads}, hidden_d={hidden_d}, n_blocks={n_blocks}")
 
