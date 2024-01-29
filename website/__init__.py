@@ -29,27 +29,19 @@ def create_app():
     with app.app_context():
         db.create_all()
 
-        if not File.query.filter(
-                db.or_(File.filename == shape_predictor_path,
-                       File.filename == face_detector_path),
-                       File.filename == max_min_path).first():
+        files_to_check = [
+            shape_predictor_path,
+            face_detector_path,
+            max_min_path
+        ]
 
-            with open(shape_predictor_path, 'rb') as file:
-                content = file.read()
-                file1 = File(filename=shape_predictor_path,
-                             content=content)
-                db.session.add(file1)
-
-            with open(face_detector_path, 'rb') as file:
-                content = file.read()
-                file2 = File(filename=face_detector_path, content=content)
-                db.session.add(file2)
-
-            with open(max_min_path, 'rb') as file:
-                content = file.read()
-                file3 = File(filename=max_min_path, content=content)
-                db.session.add(file3)
-
+        for file_path in files_to_check:
+            if not File.query.filter_by(filename=file_path).first():
+                with open(file_path, 'rb') as file:
+                    content = file.read()
+                    new_file = File(filename=file_path, content=content)
+                    db.session.add(new_file)
+                db.session.commit()
             db.session.commit()
         else:
             pass
