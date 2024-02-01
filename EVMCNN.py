@@ -149,10 +149,13 @@ class CustomDatasetNormalized(Dataset):
             hr_norm = float(hr_norm)
             hr_original = float(hr_original)
         except ValueError:
-            raise ValueError(f"[x] - E: hr_norm o hr_original are not numbers in index: {idx}")
+            raise ValueError(f"[x] - E: hr_norm or hr_original are not numbers in index: {idx}")
 
-
-        return img, hr_norm, hr_original
+        if hr_original == 1:
+            del self.img_and_label[idx]
+            return self.__getitem__(idx)
+        else:
+            return img, hr_norm, hr_original
 
 
 
@@ -427,11 +430,11 @@ main_directory = "/home/ubuntu/data/ecg-fitness_raw-v1.0"
 video_to_process = 95
 dataset_path = "/home/ubuntu/data/ecg-fitness_raw-v1.0/dlib/Dataset/EVMCNN.pth"
 #----------UNCOMMENT TO PROCESS VIDEO AND TRAIN DATA------------------------------
-# final_dataset = process_and_create_dataset(main_directory, video_to_process)
-# norm_dataset = []
-# normalized_dataset = normalize(final_dataset, norm_dataset)
-# torch.save(normalized_dataset, dataset_path)
-# print("[INFO] -Global custom dataset saved!")
+final_dataset = process_and_create_dataset(main_directory, video_to_process)
+norm_dataset = []
+normalized_dataset = normalize(final_dataset, norm_dataset)
+torch.save(normalized_dataset, dataset_path)
+print("[INFO] -Global custom dataset saved!")
 # ---------------------------------------------------------------------------------
 
 loaded_dataset = torch.load(dataset_path)
