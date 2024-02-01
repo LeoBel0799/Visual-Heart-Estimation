@@ -143,11 +143,12 @@ class MyViT(nn.Module):
         self.class_token = nn.Parameter(torch.randn(1, hidden_d))
         self.register_buffer("positional_embeddings", get_positional_embeddings(n_patches**2 + 1, hidden_d), persistent=False)
         self.blocks = nn.ModuleList([MyViTBlock(hidden_d, n_heads) for _ in range(n_blocks)])
-        self.ffnn = nn.Sequential(
-            nn.Linear(hidden_d, hidden_d),
-            nn.ReLU(),
-            nn.Linear(hidden_d, out_d)
-        )
+        self.ffnn = nn.Linear(hidden_d, out_d)
+        # self.ffnn = nn.Sequential(
+        #     nn.Linear(hidden_d, hidden_d),
+        #     nn.ReLU(),
+        #     nn.Linear(hidden_d, out_d)
+        # )
 
     def forward(self, images):
         n, c, h, w = images.shape
@@ -159,9 +160,7 @@ class MyViT(nn.Module):
 
         for block in self.blocks:
             out = block(out)
-
-        out = out[:, 0]  # Get only the classification token
-
+        out = out[:, 0]
         # Apply the feed-forward neural network for regression
         output = self.ffnn(out)
 
@@ -222,10 +221,13 @@ class CustomDatasetNormalized(Dataset):
             hr_norm = float(hr_norm)
             hr_original = float(hr_original)
         except ValueError:
-            raise ValueError(f"[x] - E: hr_norm o hr_original are not numbers in index: {idx}")
+            raise ValueError(f"[x] - E: hr_norm or hr_original are not numbers in index: {idx}")
 
-
-        return img, hr_norm, hr_original
+        if hr_original == 1:
+            del self.img_and_label[idx]
+            return self.__getitem__(idx)
+        else:
+            return img, hr_norm, hr_original
 
 
 def extract_face_region(image, landmarks):
@@ -252,8 +254,7 @@ def extract_face_region(image, landmarks):
             feature_image = np.moveaxis(feature_image, -1, 0)
         else:
             feature_image = cv2.resize(face_region, (200, 200))
-            feature_image = feature_image / 255.0
-            feature_image = np.expand_dims(feature_image, axis=0)
+            # feature_image_res = np.expand_dims(feature_image, axis=0)
 
         return feature_image
     else:
@@ -366,10 +367,8 @@ def process_video(video_path, video_csv_path, face_detector, landmark_predictor,
         if not ret or frame_count >= max_frames_to_analyze:
             break
 
-        gray_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-
         if frame_count % 10 == 0:
-            faces = face_detector(gray_frame, 1)
+            faces = face_detector(frame, 1)
 
             if faces:
                 count += 1
@@ -384,9 +383,9 @@ def process_video(video_path, video_csv_path, face_detector, landmark_predictor,
             continue
 
         face = faces[0]
-        landmarks = landmark_predictor(gray_frame, face.rect)
+        landmarks = landmark_predictor(frame, face.rect)
 
-        face_region = extract_face_region(gray_frame, landmarks)
+        face_region = extract_face_region(frame, landmarks)
         if face_region is not None:
             rois_list.append(face_region)
             bbox = (face.rect.left(), face.rect.top(), face.rect.width(), face.rect.height())
@@ -479,22 +478,18 @@ def normalize(custom_dataset, normalized_dataset):
     min_mean_hr = float('inf')
     max_mean_hr = float('-inf')
 
-    current_directory = os.getcwd()
-    save_file_path = os.path.join(current_directory, 'min_max_values_vit.txt')
 
     for _, mean_hr in custom_dataset:
         min_mean_hr = min(min_mean_hr, mean_hr)
         max_mean_hr = max(max_mean_hr, mean_hr)
 
-    with open(save_file_path, 'w') as file:
-        file.write(f'min_mean_hr: {min_mean_hr}\n')
-        file.write(f'max_mean_hr: {max_mean_hr}\n')
+
 
     for i in range(len(custom_dataset)):
         img, mean_hr = custom_dataset[i]
         norm_mean_hr = (mean_hr - min_mean_hr) / (max_mean_hr - min_mean_hr)
         normalized_dataset.append([img, norm_mean_hr, mean_hr])
-    return CustomDatasetNormalized(normalized_dataset), min_mean_hr, max_mean_hr
+    return CustomDatasetNormalized(normalized_dataset)
 
 
 def denormalize(y, max_v, min_v):
@@ -503,17 +498,41 @@ def denormalize(y, max_v, min_v):
 
 
 main_directory = "/home/ubuntu/data/ecg-fitness_raw-v1.0"
-video_to_process = 90
+video_to_process = 95
 dataset_path = "/home/ubuntu/data/ecg-fitness_raw-v1.0/dlib/Dataset/ViT.pth"
-final_dataset = process_and_create_dataset(main_directory, video_to_process)
-norm_dataset = []
-normalized_dataset, min_for_denorm, max_for_denorm = normalize(final_dataset, norm_dataset)
 
+#----------UNCOMMENT TO PROCESS VIDEO AND TRAIN DATA------------------------------
+# final_dataset = process_and_create_dataset(main_directory, video_to_process)
+# norm_dataset = []
+# normalized_dataset = normalize(final_dataset, norm_dataset)
+# torch.save(normalized_dataset, dataset_path)
+# print("[INFO] -Global custom dataset saved!")
+# ---------------------------------------------------------------------------------
 
-torch.save(normalized_dataset, dataset_path)
-print("[INFO] -Global custom dataset saved!")
 loaded_dataset = torch.load(dataset_path)
+min_hr_original = float('inf')
+max_hr_original = float('-inf')
+filtered_data = [item for item in loaded_dataset if item is not None]
+
+for _, _, hr_original in loaded_dataset.img_and_label:
+    try:
+        hr_original = float(hr_original)
+        min_hr_original = min(min_hr_original, hr_original)
+        max_hr_original = max(max_hr_original, hr_original)
+    except ValueError:
+        print(f"Skipping non-numeric value in hr_original")
+
 print("[INFO] -Global custom dataset loaded...!")
+
+current_directory = os.getcwd()
+save_file_path = os.path.join(current_directory, 'min_max_values_vit.txt')
+print(r"Max value:", {max_hr_original})
+print(r"Min value:", {min_hr_original})
+
+with open(save_file_path, 'w') as file:
+    file.write(f'min_mean_hr: {min_hr_original}\n')
+    file.write(f'max_mean_hr: {max_hr_original}\n')
+
 
 train_size = int(0.8 * len(loaded_dataset))
 val_size = int(0.1 * len(loaded_dataset))
@@ -521,7 +540,7 @@ test_size = len(loaded_dataset) - train_size - val_size
 
 train_dataset, val_dataset, test_dataset = random_split(loaded_dataset, [train_size, val_size, test_size])
 
-batch_size = 16
+batch_size = 1
 train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, pin_memory=True)
 val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False, pin_memory=True)
 test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False, pin_memory=True)
@@ -539,7 +558,7 @@ print(f"[INFO] - Total number of samples in test_loader: {total_samples_in_test_
 
 
 N_EPOCHS = 50
-LR = 0.001
+LR = 0.0001
 PATIENCE = 5
 WD = 0.01
 
@@ -554,10 +573,10 @@ criterion = nn.MSELoss()
 def objective(trial, train, val):
     best_val_rmse = float('inf')
     val_loss_list = []
-    n_patches = trial.suggest_categorical('n_patches', [8, 12, 16, 24, 32])
+    n_patches = trial.suggest_categorical('n_patches', [1, 2, 4, 8])
     n_heads = trial.suggest_categorical('n_heads', [1,2,4])
-    hidden_d = trial.suggest_categorical('hidden_d', [8,16,24,32,64])
-    n_blocks = trial.suggest_categorical('n_block', [2,4,8])
+    hidden_d = trial.suggest_categorical('hidden_d', [4,8,12])
+    n_blocks = trial.suggest_int('n_block', 2,8)
 
     print(f"[INFO] - Trying parameters: patch_size={n_patches}, heads={n_heads}, hidden_d={hidden_d}, n_blocks={n_blocks}")
 
@@ -568,7 +587,8 @@ def objective(trial, train, val):
     optimizer = AdamW(model.parameters(), lr=LR, weight_decay=WD)
     criterion = nn.MSELoss()
 
-    N_EPOCHS = 20
+
+    N_EPOCHS = 10
     for epoch in range(N_EPOCHS):
         model.train()
         train_loss = 0.0
@@ -586,15 +606,15 @@ def objective(trial, train, val):
             with autocast():
                 outputs = model(images)
                 loss = criterion(outputs, targets_norm)
-
+                rmse_loss = torch.sqrt(loss)
             optimizer.zero_grad()
-            scaler.scale(loss).backward()
+            scaler.scale(rmse_loss).backward()
             scaler.step(optimizer)
             scaler.update()
 
             train_loss += loss.item()
 
-        print(f"Epoch {epoch + 1}/{N_EPOCHS} loss: {train_loss:.2f}")
+        print(f"Epoch {epoch + 1}/{N_EPOCHS} loss: {rmse_loss:.2f}")
 
 
         model.eval()
@@ -613,20 +633,15 @@ def objective(trial, train, val):
                 targets_original = targets_original.to(torch.float32)
 
                 outputs = model(images)
-                loss = criterion(outputs, targets_norm)
-
-                val_loss += loss.item() / len(val_loader)
+                loss = torch.sqrt(criterion(outputs, targets_norm))
+                val_loss += loss.item()
                 predictions.extend(outputs.cpu().numpy())
                 targets_all.extend(targets_norm.cpu().numpy())
 
+            mse = mean_squared_error(targets_all, predictions)
+            rmse_validation = np.sqrt(mse)
 
-        mse = mean_squared_error(targets_all, predictions)
-        rmse_validation = np.sqrt(mse)
-        avg_val_loss = val_loss / len(val_loader)
-        val_loss_list.append(avg_val_loss)
-
-        print(
-            f"Epoch {epoch + 1}/{N_EPOCHS}, Validation RMSE: {rmse_validation:.4f},  Avg validation Loss: {avg_val_loss}")
+            print(f"Epoch {epoch + 1}/{N_EPOCHS}, Validation RMSE: {rmse_validation:.4f}")
         # Early stopping check
         if rmse_validation < best_val_rmse:
             best_val_rmse = rmse_validation
@@ -640,7 +655,7 @@ def objective(trial, train, val):
     return rmse_validation
 
 study = optuna.create_study(direction='minimize')
-study.optimize(lambda trial: objective(trial, train_loader, val_loader), n_trials=10)
+study.optimize(lambda trial: objective(trial, train_loader, val_loader), n_trials=5)
 
 best_params = study.best_params
 print("[INFO] - Best Hyperparameters:", best_params)
@@ -682,25 +697,20 @@ for epoch in range(N_EPOCHS):
         targets_norm = targets_norm.to(torch.float32)
         targets_original = targets_original.to(torch.float32)
 
-        images = images.to(torch.float32)
-        targets_norm = targets_norm.to(torch.float32)
-        targets_original = targets_original.to(torch.float32)
-
         with autocast():
             outputs = best_model(images)
             loss = criterion(outputs, targets_norm)
+            rmse_loss = torch.sqrt(loss)
 
         optimizer.zero_grad()
-        scaler.scale(loss).backward()
+        scaler.scale(rmse_loss).backward()
         scaler.step(optimizer)
         scaler.update()
 
-        train_loss += loss.item()
 
-    print(f"Epoch {epoch + 1}/{N_EPOCHS} loss: {train_loss:.2f}")
+    print(f"Epoch {epoch + 1}/{N_EPOCHS} loss: {rmse_loss:.2f}")
 
-    avg_train_loss = train_loss / len(train_loader)
-    train_loss_list.append(avg_train_loss)
+    train_loss_list.append(rmse_loss)
 
     best_model.eval()
     predictions = []
@@ -718,19 +728,16 @@ for epoch in range(N_EPOCHS):
             targets_original = targets_original.to(torch.float32)
 
             outputs = best_model(images)
-            loss = criterion(outputs, targets_norm)
+            loss = torch.sqrt(criterion(outputs, targets_norm))
 
-            val_loss += loss.item() / len(val_loader)
             predictions.extend(outputs.cpu().numpy())
             targets_all.extend(targets_norm.cpu().numpy())
 
     mse = mean_squared_error(targets_all, predictions)
     rmse_validation = np.sqrt(mse)
     rmse_list_val.append(rmse_validation)
-    avg_val_loss = val_loss / len(val_loader)
-    val_loss_list.append(avg_val_loss)
 
-    print(f"Epoch {epoch + 1}/{N_EPOCHS}, Validation RMSE: {rmse_validation:.4f},  Avg validation Loss: {avg_val_loss}")
+    print(f"Epoch {epoch + 1}/{N_EPOCHS}, Validation RMSE: {rmse_validation:.4f}")
     # Early stopping check
     if rmse_validation < best_val_rmse:
         best_val_rmse = rmse_validation
@@ -740,7 +747,6 @@ for epoch in range(N_EPOCHS):
         if no_improvement_count >= PATIENCE:
             print(f"No improvement for {PATIENCE} epochs. Early stopping.")
             break
-
 
 
 # Testing
@@ -767,19 +773,17 @@ with torch.no_grad():
         targets_original = targets_original.to(torch.float32)
 
         outputs = best_model(images)
-        loss = criterion(outputs, targets_norm)
-        test_loss += loss.item() / len(test_loader)
-
+        loss = torch.sqrt(criterion(outputs, targets_norm))
+        test_loss += loss.item()
         predictions.extend(outputs.cpu().numpy())
         targets_all.extend(targets_norm.cpu().numpy())
 
-
     for value in predictions:
-        denormalized_value = np.round(denormalize(value[0], max_for_denorm, min_for_denorm), 2)
+        denormalized_value = np.round(denormalize(value[0], max_hr_original,min_hr_original), 2)
         denormalized_values_list_pred.append(denormalized_value)
 
     for value in targets_all:
-        denormalized_value = np.round(denormalize(value, max_for_denorm, min_for_denorm), 2)
+        denormalized_value = np.round(denormalize(value,max_hr_original,min_hr_original), 2)
         denormalized_values_list_target.append(denormalized_value)
 
 
@@ -790,12 +794,12 @@ residuals = np.array(targets_all) - np.array(predictions)
 sde = np.std(residuals) # Calcolo della deviazione standard dell'errore
 
 print("\n--------------------------TEST METRICS--------------------------------\n")
-print(f"Test RMSE: {rmse:.4f}, Test Loss: {test_loss:.2f}, Test MAPE: {mape:.2f}")
+print(f"Test RMSE: {rmse:.4f}, Test MAPE: {mape:.2f}")
 print(f"Standard Deviation of Error (SDe): {sde:.2f}")
 
 
 
-torch.save(best_model.state_dict(), '/home/ubuntu/data/ecg-fitness_raw-v1.0/dlib/Model/DeepPhys.pth')
+torch.save(best_model.state_dict(), '/home/ubuntu/data/ecg-fitness_raw-v1.0/dlib/Model/VIT.pth')
 print(f"\nGround Truth:", denormalized_values_list_target)
 print("\nPrediction:", denormalized_values_list_pred)
 
@@ -810,7 +814,7 @@ plt.savefig('/home/ubuntu/data/ecg-fitness_raw-v1.0/dlib/Plot/true_vs_predicted_
 plt.close()
 
 plt.plot(train_loss_list, label='Train Loss')
-plt.plot(val_loss_list, label='Val Loss')
+plt.plot(rmse_list_val, label='Val Loss')
 plt.legend()
 plt.xlabel('Epoch')
 plt.ylabel('Loss')

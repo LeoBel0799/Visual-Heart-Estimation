@@ -405,22 +405,18 @@ def normalize(custom_dataset, normalized_dataset):
     min_mean_hr = float('inf')
     max_mean_hr = float('-inf')
 
-    current_directory = os.getcwd()
-    save_file_path = os.path.join(current_directory, 'min_max_values_EVMCNN.txt')
 
     for _, mean_hr in custom_dataset:
         min_mean_hr = min(min_mean_hr, mean_hr)
         max_mean_hr = max(max_mean_hr, mean_hr)
 
-    with open(save_file_path, 'w') as file:
-        file.write(f'min_mean_hr: {min_mean_hr}\n')
-        file.write(f'max_mean_hr: {max_mean_hr}\n')
+
 
     for i in range(len(custom_dataset)):
         img, mean_hr = custom_dataset[i]
         norm_mean_hr = (mean_hr - min_mean_hr) / (max_mean_hr - min_mean_hr)
         normalized_dataset.append([img, norm_mean_hr, mean_hr])
-    return CustomDatasetNormalized(normalized_dataset), min_mean_hr, max_mean_hr
+    return CustomDatasetNormalized(normalized_dataset)
 
 def denormalize(y, max_v, min_v):
     final_value = y * (max_v - min_v) + min_v
@@ -430,15 +426,38 @@ def denormalize(y, max_v, min_v):
 main_directory = "/home/ubuntu/data/ecg-fitness_raw-v1.0"
 video_to_process = 95
 dataset_path = "/home/ubuntu/data/ecg-fitness_raw-v1.0/dlib/Dataset/EVMCNN.pth"
-final_dataset = process_and_create_dataset(main_directory, video_to_process)
-norm_dataset = []
-normalized_dataset, min_for_denorm, max_for_denorm = normalize(final_dataset, norm_dataset)
+#----------UNCOMMENT TO PROCESS VIDEO AND TRAIN DATA------------------------------
+# final_dataset = process_and_create_dataset(main_directory, video_to_process)
+# norm_dataset = []
+# normalized_dataset = normalize(final_dataset, norm_dataset)
+# torch.save(normalized_dataset, dataset_path)
+# print("[INFO] -Global custom dataset saved!")
+# ---------------------------------------------------------------------------------
 
-
-torch.save(normalized_dataset, dataset_path)
-print("[INFO] - Global custom dataset saved!")
 loaded_dataset = torch.load(dataset_path)
 print("[INFO] - Global custom dataset loaded...!")
+min_hr_original = float('inf')
+max_hr_original = float('-inf')
+filtered_data = [item for item in loaded_dataset if item is not None]
+
+for _, _, hr_original in loaded_dataset.img_and_label:
+    try:
+        hr_original = float(hr_original)
+        min_hr_original = min(min_hr_original, hr_original)
+        max_hr_original = max(max_hr_original, hr_original)
+    except ValueError:
+        print(f"Skipping non-numeric value in hr_original")
+
+print("[INFO] -Global custom dataset loaded...!")
+
+current_directory = os.getcwd()
+save_file_path = os.path.join(current_directory, 'min_max_values_EVMCNN.txt')
+print(r"Max value:", {max_hr_original})
+print(r"Min value:", {min_hr_original})
+
+with open(save_file_path, 'w') as file:
+    file.write(f'min_mean_hr: {min_hr_original}\n')
+    file.write(f'max_mean_hr: {max_hr_original}\n')
 
 train_size = int(0.8 * len(loaded_dataset))
 val_size = int(0.1 * len(loaded_dataset))
@@ -446,7 +465,7 @@ test_size = len(loaded_dataset) - train_size - val_size
 
 train_dataset, val_dataset, test_dataset = random_split(loaded_dataset, [train_size, val_size, test_size])
 
-batch_size = 16
+batch_size = 1
 train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, pin_memory=True)
 val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False, pin_memory=True)
 test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False, pin_memory=True)
@@ -461,7 +480,7 @@ total_samples_in_test_loader = len(test_loader.dataset)
 print(f"[INFO] - Total number of samples in test_loader: {total_samples_in_test_loader}")
 
 criterion = nn.MSELoss()
-LR = 0.001
+LR = 0.0001
 PATIENCE = 5
 WD = 0.01
 
@@ -504,16 +523,15 @@ for epoch in range(num_epochs):
 
         outputs = model(images)
         loss = criterion(outputs, targets_norm)
-        train_loss += loss.detach().cpu().item() / len(train_loader)
+        rmse_loss = torch.sqrt(loss)
+
         optimizer.zero_grad()
         loss.backward()
         optimizer.step()
 
-        train_loss += loss.item()
-    print(f"Epoch {epoch + 1}/{num_epochs} loss: {train_loss:.2f}")
+    print(f"Epoch {epoch + 1}/{num_epochs} loss: {rmse_loss:.2f}")
 
-    avg_train_loss = train_loss / len(train_loader)
-    train_loss_list.append(avg_train_loss)
+    train_loss_list.append(rmse_loss)
 
     model.eval()
     predictions = []
@@ -532,20 +550,15 @@ for epoch in range(num_epochs):
             targets_original = targets_original.to(torch.float32)
 
             outputs = model(images)
-            loss = criterion(outputs, targets_norm)
-            val_loss += loss.detach().cpu().item() / len(val_loader)
-            correct += torch.sum(torch.argmax(outputs, dim=1) == targets_norm).detach().cpu().item()
-            total += len(images)
+            loss = torch.sqrt(criterion(outputs, targets_norm))
             predictions.extend(outputs.cpu().numpy())
             targets_all.extend(targets_norm.cpu().numpy())
 
     mse = mean_squared_error(targets_all, predictions)
     rmse_validation = np.sqrt(mse)
     rmse_list_val.append(rmse_validation)
-    avg_val_loss = val_loss / len(val_loader)
-    val_loss_list.append(avg_val_loss)
 
-    print(f"Epoch {epoch + 1}/{num_epochs}, Validation RMSE: {rmse_validation:.4f},  Avg validation Loss: {avg_val_loss}")
+    print(f"Epoch {epoch + 1}/{num_epochs}, Validation RMSE: {rmse_validation:.4f}")
     # Early stopping check
     if rmse_validation < best_val_rmse:
         best_val_rmse = rmse_validation
@@ -580,17 +593,17 @@ with torch.no_grad():
         targets_original = targets_original.to(torch.float32)
 
         outputs = model(images)
-        loss = criterion(outputs, targets_norm)
-        test_loss += loss.detach().cpu().item() / len(test_loader)
+        loss = torch.sqrt(criterion(outputs, targets_norm))
+        test_loss += loss.item()
         predictions.extend(outputs.cpu().numpy())
         targets_all.extend(targets_norm.cpu().numpy())
 
     for value in predictions:
-        denormalized_value = np.round(denormalize(value[0], max_for_denorm, min_for_denorm), 2)
+        denormalized_value = np.round(denormalize(value[0], max_hr_original,min_hr_original), 2)
         denormalized_values_list_pred.append(denormalized_value)
 
     for value in targets_all:
-        denormalized_value = np.round(denormalize(value, max_for_denorm, min_for_denorm), 2)
+        denormalized_value = np.round(denormalize(value,max_hr_original,min_hr_original), 2)
         denormalized_values_list_target.append(denormalized_value)
 
 
@@ -601,11 +614,11 @@ residuals = np.array(targets_all) - np.array(predictions)
 sde = np.std(residuals) # Calcolo della deviazione standard dell'errore
 
 print("\n--------------------------TEST METRICS--------------------------------\n")
-print(f"Test RMSE: {rmse:.4f}, Test Loss: {test_loss:.2f}, Test MAPE: {mape:.2f}")
+print(f"Test RMSE: {rmse:.4f}, Test MAPE: {mape:.2f}")
 print(f"Standard Deviation of Error (SDe): {sde:.2f}")
 
 
-torch.save(model.state_dict(), '/home/ubuntu/data/ecg-fitness_raw-v1.0/dlib/Model/DeepPhys.pth')
+torch.save(model.state_dict(), '/home/ubuntu/data/ecg-fitness_raw-v1.0/dlib/Model/EVMCNN.pth')
 print(f"\nGround Truth:", denormalized_values_list_target)
 print("\nPrediction:", denormalized_values_list_pred)
 
