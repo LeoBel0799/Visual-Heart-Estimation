@@ -1,7 +1,7 @@
-
 from facenet_pytorch import *
 import neurokit2 as nk
 from torch.cuda.amp import autocast, GradScaler
+from torchvision import transforms
 from sklearn.metrics import mean_absolute_error
 from scipy.stats import pearsonr
 import dlib
@@ -38,6 +38,7 @@ from torch.optim import AdamW
 from sklearn.metrics import mean_squared_error, r2_score
 from einops.layers.torch import Rearrange
 import warnings
+from PIL import Image
 
 warnings.filterwarnings("ignore")
 
@@ -144,11 +145,7 @@ class MyViT(nn.Module):
         self.register_buffer("positional_embeddings", get_positional_embeddings(n_patches**2 + 1, hidden_d), persistent=False)
         self.blocks = nn.ModuleList([MyViTBlock(hidden_d, n_heads) for _ in range(n_blocks)])
         self.ffnn = nn.Linear(hidden_d, out_d)
-        # self.ffnn = nn.Sequential(
-        #     nn.Linear(hidden_d, hidden_d),
-        #     nn.ReLU(),
-        #     nn.Linear(hidden_d, out_d)
-        # )
+
 
     def forward(self, images):
         n, c, h, w = images.shape
@@ -502,12 +499,12 @@ video_to_process = 95
 dataset_path = "/home/ubuntu/data/ecg-fitness_raw-v1.0/dlib/Dataset/ViT.pth"
 
 #----------UNCOMMENT TO PROCESS VIDEO AND TRAIN DATA------------------------------
-# final_dataset = process_and_create_dataset(main_directory, video_to_process)
-# norm_dataset = []
-# normalized_dataset = normalize(final_dataset, norm_dataset)
-# torch.save(normalized_dataset, dataset_path)
-# print("[INFO] -Global custom dataset saved!")
-# ---------------------------------------------------------------------------------
+final_dataset = process_and_create_dataset(main_directory, video_to_process)
+norm_dataset = []
+normalized_dataset = normalize(final_dataset, norm_dataset)
+torch.save(normalized_dataset, dataset_path)
+print("[INFO] -Global custom dataset saved!")
+#---------------------------------------------------------------------------------
 
 loaded_dataset = torch.load(dataset_path)
 min_hr_original = float('inf')
@@ -656,7 +653,6 @@ def objective(trial, train, val):
 
 study = optuna.create_study(direction='minimize')
 study.optimize(lambda trial: objective(trial, train_loader, val_loader), n_trials=5)
-
 best_params = study.best_params
 print("[INFO] - Best Hyperparameters:", best_params)
 
@@ -798,8 +794,17 @@ print(f"Test RMSE: {rmse:.4f}, Test MAPE: {mape:.2f}")
 print(f"Standard Deviation of Error (SDe): {sde:.2f}")
 
 
+image_path = "/home/ubuntu/data/ecg-fitness_raw-v1.0/dlib/feature_img.png"
+image = Image.open(image_path).convert("RGB")
+transform = transforms.Compose([
+    transforms.Resize((40, 40)),
+    transforms.ToTensor(),
+])
 
-torch.save(best_model.state_dict(), '/home/ubuntu/data/ecg-fitness_raw-v1.0/dlib/Model/VIT.pth')
+input_example = transform(image).unsqueeze(0)
+
+traced_model = torch.jit.trace(best_model, input_example)
+torch.jit.save(best_model, '/home/ubuntu/data/ecg-fitness_raw-v1.0/dlib/Model/VIT_jit.pt')
 print(f"\nGround Truth:", denormalized_values_list_target)
 print("\nPrediction:", denormalized_values_list_pred)
 
