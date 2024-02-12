@@ -656,13 +656,16 @@ with torch.no_grad():
 
 mse = mean_squared_error(targets_all, predictions)
 rmse = np.sqrt(mse)
-mape = mean_absolute_error(targets_all, predictions)
+mae = mean_absolute_error(targets_all, predictions)
+mean_targets = np.mean(targets_all)
+targets_all_array = np.array(targets_all)
+predictions_array = np.array(predictions)
+mape = (np.mean(np.abs(targets_all_array - predictions_array) / targets_all_array)) * 100
 residuals = np.array(targets_all) - np.array(predictions)
-sde = np.std(residuals)  # Calcolo della deviazione standard dell'errore
+sde = np.std(residuals)
 
 print("\n--------------------------TEST METRICS--------------------------------\n")
-print(f"Test RMSE: {rmse:.4f}, Test MAPE: {mape:.2f}")
-print(f"Standard Deviation of Error (SDe): {sde:.2f}")
+print(f"MSE: {mse:.2f}, RMSE: {rmse:.4f}, MAE: {mae:.2f}, MAPE: {mape:.2f}, Standard Deviation of Error (SDe): {sde:.2f}")
 
 torch.save(model.state_dict(), '/home/ubuntu/data/ecg-fitness_raw-v1.0/dlib/Model/DeepPhys.pth')
 print(f"\nGround Truth:", denormalized_values_list_target)
@@ -678,7 +681,7 @@ plt.savefig('/home/ubuntu/data/ecg-fitness_raw-v1.0/dlib/Plot/true_vs_predicted_
 plt.close()
 
 plt.plot(train_loss_list, label='Train Loss')
-plt.plot(val_loss_list, label='Val Loss')
+plt.plot(rmse_list_val, label='Val Loss')
 plt.legend()
 plt.xlabel('Epoch')
 plt.ylabel('Loss')
