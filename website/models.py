@@ -7,6 +7,7 @@ from sqlalchemy import LargeBinary
 class Video(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     video_data = db.Column(LargeBinary)
+    path = db.Column(db.String)
     creation_date = db.Column(db.DateTime(timezone=True), default=func.now())
     user_id = db.Column(db.Integer, db.ForeignKey('user.id'))
 
@@ -26,3 +27,8 @@ class File(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     filename = db.Column(db.String(255), nullable=False, unique=True)
     content = db.Column(db.LargeBinary, nullable=False)
+
+
+class VideoRecord(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    file_path = db.Column(db.String(255), nullable=False)

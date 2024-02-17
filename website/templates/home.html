@@ -1,131 +1,134 @@
-<!DOCTYPE html>
+ <!DOCTYPE html>
 <html lang="en">
-{% extends "base.html" %} {% block title %}Home{% endblock %} {% block content
-%}
 <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.4.1/css/bootstrap.min.css"
-        integrity="sha384-Vkoo8x4CGsO3+Hhxv8T/Q5PaXtkKtu6ug5TOeNV6gBiFeWPGFN9MuhOf23Q9Ifjh"
-        crossorigin="anonymous" />
-    <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/font-awesome/4.7.0/css/font-awesome.min.css"
-        crossorigin="anonymous" />
-
-    <!-- Aggiungi questo blocco di codice per lo stile della verification-box -->
-    <style>
-        .verification-box {
-            background-color: #5cb85c; /* Colore verde */
-            color: #ffffff; /* Colore del testo bianco */
-            padding: 10px;
-            margin-top: 10px;
-            border-radius: 5px;
-        }
-
-        .tick-mark {
-            font-size: 20px;
-            margin-right: 5px;
-        }
-    </style>
+  <title>Visual Heart Estimation</title>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="X-UA-Compatible" content="ie=edge">
+  <link rel="stylesheet" href="vendors/owl-carousel/css/owl.carousel.min.css">
+  <link rel="stylesheet" href="vendors/owl-carousel/css/owl.theme.default.css">
+  <link rel="stylesheet" href="vendors/mdi/css/materialdesignicons.min.css">
+  <link rel="stylesheet" href="vendors/aos/css/aos.css">
+  <link rel="stylesheet" href="static/css/style.min.css">
 </head>
-    <style>
-        body {
-            margin: 0;
-            padding: 0;
-            display: flex;
-            flex-direction: column;
-            height: 100vh;
-        }
-
-        .buttons-container {
-            display: flex;
-            justify-content: flex-start; /* Allinea a sinistra */
-            align-items: center;
-            padding: 20px;
-        }
-
-        .custom-file-input-wrapper,
-        .upload-btn-wrapper {
-            position: relative;
-            overflow: hidden;
-            display: inline-block;
-            vertical-align: top;
-            margin-right: 20px; /* Aggiunto margine per separare i pulsanti */
-        }
-
-        .custom-file-input,
-        .upload-btn-wrapper input[type=file] {
-            position: absolute;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            cursor: pointer;
-            opacity: 0;
-        }
-
-        .custom-file-button,
-        .upload-btn-wrapper .upload-btn {
-            display: inline-block;
-            padding: 8px 16px;
-            font-size: 14px;
-            text-align: center;
-            text-decoration: none;
-            cursor: pointer;
-            border: 1px solid #007bff;
-            border-radius: 4px;
-            background-color: #007bff;
-            color: #fff;
-            transition: background-color 0.3s ease;
-            z-index: 1;
-        }
-
-        .custom-file-button:hover,
-        .upload-btn-wrapper .upload-btn:hover {
-            background-color: #0056b3;
-        }
-
-        .home-box {
-            flex-grow: 1;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            background-color: #f0f0f0;
-        }
-
-        .box-text {
-            text-align: center;
-            font-size: 18px;
-            color: #333;
-        }
-    </style>
-</head>
-
-
-<form action = "{{ url_for('views.choose_video') }}" method="POST" enctype="multipart/form-data">
-    <div class="buttons-container">
-        <div class="custom-file-input-wrapper">
-            <input type="file" name="video" accept=".mp4" class="custom-file-input" id="videoInput">
-            <div class="custom-file-button">Scegli file</div>
-        </div>
-    </div>
-
-    <div class="buttons-container">
-            <div class="upload-btn-wrapper">
-                <button type="submit" class="upload-btn btn btn-primary">Verify</button>
+<body id="body" data-spy="scroll" data-target=".navbar" data-offset="100">
+  <header id="header-section">
+    <nav class="navbar navbar-expand-lg pl-3 pl-sm-0" id="navbar">
+    <div class="container">
+      <div class="navbar-brand-wrapper d-flex w-100">
+        <img src="images/Group2.svg" alt="">
+        <button class="navbar-toggler ml-auto" type="button" data-toggle="collapse" data-target="#navbarSupportedContent" aria-controls="navbarSupportedContent" aria-expanded="false" aria-label="Toggle navigation">
+          <span class="mdi mdi-menu navbar-toggler-icon"></span>
+        </button> 
+      </div>
+      <div class="collapse navbar-collapse navbar-menu-wrapper" id="navbarSupportedContent">
+        <ul class="navbar-nav align-items-lg-center align-items-start ml-auto">
+          <li class="d-flex align-items-center justify-content-between pl-4 pl-lg-0">
+            <div class="navbar-collapse-logo">
+              <img src="images/Group2.svg" alt="">
             </div>
+            <button class="navbar-toggler close-button" type="button" data-toggle="collapse" data-target="#navbarSupportedContent" aria-controls="navbarSupportedContent" aria-expanded="false" aria-label="Toggle navigation">
+              <span class="mdi mdi-close navbar-toggler-icon pl-5"></span>
+            </button>
+          </li>
+          <li class="nav-item">
+            <a class="nav-link" href="http://127.0.0.1:5000/">Home <span class="sr-only">(current)</span></a>
+          </li>
+          <li class="nav-item">
+            <a class="nav-link" href="#features-section">About</a>
+          </li>
+ 
+ 
+      
+            {% if user.is_authenticated %}
+            <li class="nav-item">
+            <a class="nav-item nav-link" id="home" href="/">Home</a>
+            </li>
+            <li class="nav-item">
+            <a class="nav-item nav-link" id="logout" href="/logout">Logout</a>
+            </li>
+            {% else %}
+            <li class="nav-item">
+            <a class="nav-item nav-link" id="login" href="/login">Login</a>
+            </li>
+            <li class="nav-item">
+            <a class="nav-item nav-link" id="signUp" href="/sign-up">Sign Up</a>
+            </li>
+            {% endif %}
+  
+
+
+          <li class="nav-item btn-contact-me pl-4 pl-lg-0">
+            <button class="btn btn-info" data-toggle="modal" data-target="#exampleModal">Contact Me</button>
+          </li>
+        </ul>
+      </div>
+    </div> 
+    </nav>   
+  </header>
+
+  <div class="banner" >
+    <div class="container">
+      <h1 class="font-weight-semibold">Visual Heart Rate Estimation</h1>
+  <p></p>
+      <div>
+        <button class="btn btn-opacity-light mr-1" onclick="window.location.href='http://127.0.0.1:5000/index'">Load file</button>
+
+       
+      </div>
+      <img src="images/Group171.svg" alt="" class="img-fluid">
     </div>
+  </div>
+          
 
-</form>
+
+      </section>     
+   
+   
 
 
-<form action="{{ url_for('views.get_video') }}" method="GET" enctype="multipart/form-data">
-        <div class="buttons-container">
-            <div class="upload-btn-wrapper">
-                <button type="submit" class="upload-btn btn btn-primary">Upload last video</button>
+     
+    
+      <footer class="border-top">
+        <p class="text-center text-muted pt-4">MSc. Artificial Intelligence and Data Engineering<a href="" class="px-1"></a>- Leonardo Bellizzi</p>
+       
+      </footer>
+      <!-- Modal for Contact - us Button -->
+      <div class="modal fade" id="exampleModal" tabindex="-1" role="dialog" aria-labelledby="exampleModalLabel" aria-hidden="true">
+        <div class="modal-dialog" role="document">
+          <div class="modal-content">
+            <div class="modal-header">
+              <h4 class="modal-title" id="exampleModalLabel">Contact Us</h4>
             </div>
+            <div class="modal-body">
+              <form>
+                <div class="form-group">
+                  <label for="Name">Name</label>
+                  <input type="text" class="form-control" id="Name" placeholder="Name">
+                </div>
+                <div class="form-group">
+                  <label for="Email">Email</label>
+                  <input type="email" class="form-control" id="Email-1" placeholder="Email">
+                </div>
+                <div class="form-group">
+                  <label for="Message">Message</label>
+                  <textarea class="form-control" id="Message" placeholder="Enter your Message"></textarea>
+                </div>
+              </form>
+            </div>
+            <div class="modal-footer">
+              <button type="button" class="btn btn-light" data-dismiss="modal">Close</button>
+              <button type="button" class="btn btn-success">Submit</button>
+            </div>
+          </div>
         </div>
-    </div>
-</form>
-
-{% endblock %}
+      </div>
+    </div> 
+  </div>
+  <script src="static/vendors/jquery/jquery.min.js"></script>
+  <script src="static/vendors/bootstrap/bootstrap.min.js"></script>
+  <script src="static/vendors/owl-carousel/js/owl.carousel.min.js"></script>
+  <script src="static/vendors/aos/js/aos.js"></script>
+  <script src="static/js/landingpage.js"></script>
+</body>
 </html>
