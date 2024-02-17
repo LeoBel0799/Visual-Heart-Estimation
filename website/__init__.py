@@ -17,6 +17,7 @@ def create_app():
     shape_predictor_path = path.join(project_directory, r'shape_predictor_68_face_landmarks_GTX.dat')
     face_detector_path = path.join(project_directory, r'mmod_human_face_detector.dat')
     max_min_path = path.join(project_directory, r'min_max_values_vit.txt')
+    model_path = path.join(project_directory,r'VIT_jit.pt')
 
     from .views import views
     from .auth import auth
@@ -32,7 +33,7 @@ def create_app():
         files_to_check = [
             shape_predictor_path,
             face_detector_path,
-            max_min_path
+            max_min_path,
         ]
 
         for file_path in files_to_check:
@@ -45,6 +46,7 @@ def create_app():
             db.session.commit()
         else:
             pass
+
 
     login_manager = LoginManager()
     login_manager.login_view = 'auth.login'

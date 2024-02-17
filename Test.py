@@ -11,7 +11,7 @@ model = Transformer.ViT()
 model.load_state_dict(torch.load(r'F:\Università\Thesis\VIT.py'))
 model.eval()
 
-video_path = r'/static/videos/film.mp4'
+video_path = r'website/static/videos/film.mp4'
 face_detector = r'F:\Università\Thesis\mmod_human_face_detector.dat'
 landmark_predictor = r'F:\Università\Thesis\shape_predictor_68_face_landmarks_GTX.dat'
 file_path = r'F:\Università\Thesis\min_max_values.txt'

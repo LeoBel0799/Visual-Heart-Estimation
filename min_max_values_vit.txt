@@ -1,0 +1,2 @@
+min_mean_hr: 53.0
+max_mean_hr: 127.0
