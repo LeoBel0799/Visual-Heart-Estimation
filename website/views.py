@@ -153,9 +153,8 @@ def predict2():
                 original_prediction = round(original_prediction, 2)
 
                 # Draw the prediction on the frame
-                cv2.putText(frame, f'Predicted BPM: {original_prediction}', (x, y - 10), cv2.FONT_HERSHEY_SIMPLEX, 1.5, (0, 255, 0), 2)
+                cv2.putText(frame, f'BPM: {original_prediction}', (x, y - 10), cv2.FONT_HERSHEY_SIMPLEX, 1.0,(0, 0, 255), 2)
                 cv2.rectangle(frame, (x, y), (x + w, y + h), (0, 255, 0), 2)
-
 
             # Display the frame in the browser in real-time
             cv2.imshow('Video Prediction', frame)
@@ -254,7 +253,7 @@ def predict():
                 original_prediction = round(original_prediction, 2)
 
                 # Draw the prediction on the frame
-                cv2.putText(frame, f'Predicted BPM: {original_prediction}', (x, y - 10), cv2.FONT_HERSHEY_SIMPLEX, 1.5, (0, 255, 0), 2)
+                cv2.putText(frame, f'BPM: {original_prediction}', (x, y - 10), cv2.FONT_HERSHEY_SIMPLEX, 1.0,(0, 0, 255), 2)
                 cv2.rectangle(frame, (x, y), (x + w, y + h), (0, 255, 0), 2)
 
             # Write the frame to the output video file
