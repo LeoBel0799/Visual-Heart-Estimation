@@ -807,7 +807,7 @@ transform = transforms.Compose([
 input_example = transform(image).unsqueeze(0)
 
 traced_model = torch.jit.trace(best_model, input_example)
-torch.jit.save(best_model, '/home/ubuntu/data/ecg-fitness_raw-v1.0/dlib/Model/VIT_jit.pt')
+torch.jit.save(traced_model, '/home/ubuntu/data/ecg-fitness_raw-v1.0/dlib/Model/VIT_jit.pt')
 print(f"\nGround Truth:", denormalized_values_list_target)
 print("\nPrediction:", denormalized_values_list_pred)
 
