@@ -59,13 +59,7 @@ class DeepPhys(nn.Module):
 
     def __init__(self, in_channels=3, nb_filters1=32, nb_filters2=64, kernel_size=3, dropout_rate1=0.25,
                  dropout_rate2=0.5, pool_size=(2, 2), nb_dense=128, img_size=36):
-        """Definition of DeepPhys.
-        Args:
-          in_channels: the number of input channel. Default: 3
-          img_size: height/width of each frame. Default: 36.
-        Returns:
-          DeepPhys model.
-        """
+
         super(DeepPhys, self).__init__()
         self.in_channels = in_channels
         self.kernel_size = kernel_size
