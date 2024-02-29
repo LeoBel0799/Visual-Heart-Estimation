@@ -57,20 +57,27 @@
       <img src="images/Group171.svg" alt="" class="img-fluid">
     </div>
   </div>
+
+
+
   <div class="content-wrapper">
     <div class="container">
       <section class="features-overview" id="features-section" >
         <div class="content-header">
-            <h1>Video Prediction Save</h1>
-            <form action="/predict" method="post" enctype="multipart/form-data">
-                <input class="btn btn-info" type="file" name="file" accept="video/*" required>
-                <button class="btn btn-info" type="submit">Submit</button>
-            </form>
+        
+
+          <h1>Webcam Predictions</h1>
+
+          <form action="{{ url_for('views.predict') }}" method="POST">
+              <button class="btn btn-info" type="submit" id="startButton">Start Webcam</button>
+          </form>
+      
+   
+
+
+    
             <hr>
-           
-
-
-            <h1>Video Prediction - Live </h1>
+           <h1>Video Prediction - Live </h1>
             <form action="/predict2" method="post" enctype="multipart/form-data">
                 <input class="btn btn-info" type="file" name="file" accept="video/*" required>
                 <button class="btn btn-info" type="submit">Submit</button>
@@ -86,7 +93,11 @@
         <div class="container">
             <div class="user-info">
                 <h6>Details</h6>
-                <p>Only .mp4 videos are accepted</p>
+                <p>min_max_values_vit</p>
+                <p>min_mean_hr: 53.0</p>
+                <p>max_mean_hr: 127.0</p>
+                <p>saved model used "VIT_jit_cpu.pt"</p>
+                <p>only .mp4 video accepts.</p>
             </div>
          
         </div>
@@ -104,7 +115,7 @@
      
     
       <footer class="border-top">
-        <p class="text-center text-muted pt-4">MSc. Artificial Intelligence and Data Engineering<a href="" class="px-1"></a> - Leonardo Bellizzi</p>
+        <p class="text-center text-muted pt-4">Copyright © 2024<a href="" class="px-1"></a>All rights reserved.</p>
        
       </footer>
       <!-- Modal for Contact - us Button -->
