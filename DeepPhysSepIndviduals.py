@@ -302,7 +302,7 @@ def extract_features(video_frames, Pl, Fps, Fl, Fh):
 
 
 Pl = 4
-Fps = 5
+Fps = 10
 Fl = 0.75
 Fh = 4
 
@@ -335,7 +335,7 @@ def process_video(video_path, video_csv_path, face_detector, landmark_predictor,
         if not ret or frame_count >= max_frames_to_analyze:
             break
 
-        if frame_count % 5 == 0:
+        if frame_count % 10 == 0:
             faces = face_detector(frame, 1)
 
             if faces:
@@ -375,7 +375,12 @@ def process_video(video_path, video_csv_path, face_detector, landmark_predictor,
         #print(len(video_images))
         #print(len(ecg_hr_values))
         current_dataset = CustomDataset(video_images, ecg_hr_values)
-        return current_dataset
+        max_hr = max(current_dataset.ecg_hr_values_list)
+        min_hr = min(current_dataset.ecg_hr_values_list)
+
+        print(f"[INFO] - Max value: {max_hr}, Min value: {min_hr}")
+
+        return current_dataset, max_hr, min_hr
     else:
         print("[!] - W: Mismatch in frame counts. Unable to create CustomDataset.")
         return None
@@ -385,34 +390,86 @@ def denormalize(y, max_v, min_v):
     final_value = y * (max_v - min_v) + min_v
     return final_value
 
-def process_single_dataset(combined_person_dataset, dataset_path):
-    norm_dataset = normalize(combined_person_dataset)
+def process_single_dataset(combined_person_dataset, dataset_path, global_max_value, global_min_value):
+    norm_dataset = normalize(combined_person_dataset,global_max_value, global_min_value)
     torch.save(norm_dataset, dataset_path)
 
-def normalize(custom_dataset):
+def normalize(custom_dataset,global_max_value, global_min_value):
     normalized_dataset = []
-    min_mean_hr = float('inf')
-    max_mean_hr = float('-inf')
-
-
     for i in range(len(custom_dataset)):
         img, mean_hr = custom_dataset[i]
-        norm_mean_hr = (mean_hr - 53.0) / (127.0 - 53.0)
+        norm_mean_hr = (mean_hr - global_min_value) / (global_max_value - global_min_value)
         normalized_dataset.append([img, norm_mean_hr, mean_hr])
 
     return CustomDatasetNormalized(normalized_dataset)
 
 
-def process_and_save_datasets(main_directory, video_to_process, videos_to_process_per_person):
+# def process_and_save_datasets(main_directory, video_to_process, videos_to_process_per_person):
+#     face_detector = dlib.cnn_face_detection_model_v1(
+#         "/home/ubuntu/data/ecg-fitness_raw-v1.0/mmod_human_face_detector.dat")
+#     landmark_predictor = dlib.shape_predictor(
+#         "/home/ubuntu/data/ecg-fitness_raw-v1.0/shape_predictor_68_face_landmarks_GTX.dat")
+#     main_directories = sorted([d for d in os.listdir(main_directory) if os.path.isdir(os.path.join(main_directory, d))])
+#
+#     for person_directory in main_directories:
+#         person_directory_path = os.path.join(main_directory, person_directory)
+#         all_datasets = []
+#
+#         subdirectories = sorted([d for d in os.listdir(person_directory_path) if os.path.isdir(os.path.join(person_directory_path, d))])
+#
+#         for sub_dir in subdirectories:
+#             sub_dir_path = os.path.join(person_directory_path, sub_dir)
+#             video_files = sorted([f for f in os.listdir(sub_dir_path) if f.endswith("1.avi")])
+#
+#             for video_file in video_files:
+#                 video_path = os.path.join(sub_dir_path, video_file)
+#                 fin_csv_files = [f for f in os.listdir(sub_dir_path) if f.startswith("ecg") and f.endswith(".csv")]
+#                 for csv_file in fin_csv_files:
+#                     file_path = os.path.join(sub_dir_path, csv_file)
+#                     try:
+#                         print(f"Try to read:",{file_path})
+#                         df = pd.read_csv(file_path)
+#                         df[' ECG HR'] = df[' ECG HR'].abs()
+#                         df = df[df[' ECG HR'] >= 0]
+#                         df.to_csv(file_path, index=False)
+#                     except pd.errors.EmptyDataError:
+#                         print(f"[!] - W: '{file_path}' is empty. Skipping...")
+#                         continue
+#
+#                 if len(fin_csv_files) == 1:
+#                     fin_csv_file = fin_csv_files[0]
+#                     video_csv_path = os.path.join(sub_dir_path, fin_csv_file)
+#                     tracker = cv2.TrackerGOTURN_create()
+#                     current_dataset = process_video(video_path, video_csv_path, face_detector, landmark_predictor,
+#                                                     tracker, Pl, Fps, Fl, Fh)
+#                 else:
+#                     print(f"[x] - E: No or multiple 'fin' CSV files found in {sub_dir_path}")
+#                     continue
+#
+#                 if current_dataset is not None:
+#                     current_dataset_length = len(current_dataset)
+#                     all_datasets.append(current_dataset)
+#                     print(f"[INFO] - CustomDataset created for {video_path} with {current_dataset_length} rows")
+#         combined_person_dataset = ConcatDataset(all_datasets)
+#         dataset_path = os.path.join(main_directory, f"{person_directory}_dataset.pth")
+#         process_single_dataset(combined_person_dataset, dataset_path)
+#
+#     print("[INFO] - Global custom datasets created and saved for all persons.")
+
+def process_and_save_datasets(main_directory, videos_to_process_per_person):
     face_detector = dlib.cnn_face_detection_model_v1(
         "/home/ubuntu/data/ecg-fitness_raw-v1.0/mmod_human_face_detector.dat")
     landmark_predictor = dlib.shape_predictor(
         "/home/ubuntu/data/ecg-fitness_raw-v1.0/shape_predictor_68_face_landmarks_GTX.dat")
     main_directories = sorted([d for d in os.listdir(main_directory) if os.path.isdir(os.path.join(main_directory, d))])
 
+    global_max_value = float('-inf')
+    global_min_value = float('inf')
+
     for person_directory in main_directories:
         person_directory_path = os.path.join(main_directory, person_directory)
         all_datasets = []
+        current_dataset = None  # Initialize current_dataset
 
         subdirectories = sorted([d for d in os.listdir(person_directory_path) if os.path.isdir(os.path.join(person_directory_path, d))])
 
@@ -426,10 +483,13 @@ def process_and_save_datasets(main_directory, video_to_process, videos_to_proces
                 for csv_file in fin_csv_files:
                     file_path = os.path.join(sub_dir_path, csv_file)
                     try:
-                        print(f"Try to read:",{file_path})
+                        print(f"Try to read: {file_path}")
                         df = pd.read_csv(file_path)
+                        df[' ECG HR'] = np.where((df[' ECG HR'] < 30), np.random.randint(88, 93, size=len(df)),
+                                                df[' ECG HR'])
                         df[' ECG HR'] = df[' ECG HR'].abs()
                         df = df[df[' ECG HR'] >= 0]
+
                         df.to_csv(file_path, index=False)
                     except pd.errors.EmptyDataError:
                         print(f"[!] - W: '{file_path}' is empty. Skipping...")
@@ -439,30 +499,62 @@ def process_and_save_datasets(main_directory, video_to_process, videos_to_proces
                     fin_csv_file = fin_csv_files[0]
                     video_csv_path = os.path.join(sub_dir_path, fin_csv_file)
                     tracker = cv2.TrackerGOTURN_create()
-                    current_dataset = process_video(video_path, video_csv_path, face_detector, landmark_predictor,
+                    current_dataset,max_val,min_val = process_video(video_path, video_csv_path, face_detector, landmark_predictor,
                                                     tracker, Pl, Fps, Fl, Fh)
+
+                    global_max_value = max(global_max_value, max_val)
+                    global_min_value = min(global_min_value, min_val)
                 else:
                     print(f"[x] - E: No or multiple 'fin' CSV files found in {sub_dir_path}")
                     continue
 
-                if current_dataset is not None:
-                    current_dataset_length = len(current_dataset)
-                    all_datasets.append(current_dataset)
-                    print(f"[INFO] - CustomDataset created for {video_path} with {current_dataset_length} rows")
+            if current_dataset is not None:
+                current_dataset_length = len(current_dataset)
+                all_datasets.append(current_dataset)
+                print(f"[INFO] - CustomDataset created for {video_path} with {current_dataset_length} rows")
+
         combined_person_dataset = ConcatDataset(all_datasets)
-        dataset_path = os.path.join(main_directory, f"{person_directory}_dataset.pth")
-        process_single_dataset(combined_person_dataset, dataset_path)
+        dataset_path = os.path.join(main_directory, f"{person_directory}_dataset_deep.pth")
+        process_single_dataset(combined_person_dataset, dataset_path, global_max_value, global_min_value)
 
     print("[INFO] - Global custom datasets created and saved for all persons.")
+    return global_max_value,global_min_value
 
 
-main_directory = "/home/ubuntu/data/ecg-fitness_raw-v1.0/dlib/video/datasetIndividuali/*"
-#process_and_save_datasets(main_directory, 36, 6)
 
-all_files = glob.glob(main_directory)
-training_files = all_files[:12]
-validation_files = all_files[12:14]
-test_files = all_files[14:17]
+
+main_directory = "/home/ubuntu/data/ecg-fitness_raw-v1.0/dlib/video/"
+max_val, min_val = process_and_save_datasets(main_directory, 6)
+
+# save_file_path = "/home/ubuntu/data/ecg-fitness_raw-v1.0/dlib/DEEPPHYS/IndividuiSeparati/min_max_values_DEEP.txt"
+# with open(save_file_path, 'w') as file:
+#     file.write(f'min_hr: {min_val}\n')
+#     file.write(f'max_hr: {max_val}\n')
+#
+#
+# with open(save_file_path, 'r') as file:
+#     lines = file.readlines()
+#
+# min_val_line = lines[0].strip().split(': ')
+# max_val_line = lines[1].strip().split(': ')
+#
+# min_val = float(min_val_line[1])
+# max_val = float(max_val_line[1])
+
+min_val = 53.0
+max_val = 127.0
+print(f'min_val: {min_val}')
+print(f'max_val: {max_val}')
+
+main_directory_pth = "/home/ubuntu/data/ecg-fitness_raw-v1.0/dlib/video/*"
+
+all_files = glob.glob(main_directory_pth)
+filtered_files = [file for file in all_files if file.endswith("deep.pth")]
+
+training_files = filtered_files[:12]
+validation_files = filtered_files[12:14]
+test_files = filtered_files[14:17]
+
 
 training_datasets = [torch.load(file) for file in training_files]
 training_combined_dataset = ConcatDataset(training_datasets)
@@ -471,9 +563,10 @@ validation_combined_dataset = ConcatDataset(validation_datasets)
 test_datasets = [torch.load(file) for file in test_files]
 test_combined_dataset = ConcatDataset(test_datasets)
 
-training_loader = DataLoader(training_combined_dataset, batch_size=1, shuffle=True, num_workers=0)
-validation_loader = DataLoader(validation_combined_dataset, batch_size=1, shuffle=False, num_workers=0)
-test_loader = DataLoader(test_combined_dataset, batch_size=1, shuffle=False, num_workers=0)
+
+training_loader = DataLoader(training_combined_dataset, batch_size=1, shuffle=True, pin_memory=True, num_workers=6)
+validation_loader = DataLoader(validation_combined_dataset, batch_size=1, shuffle=False, pin_memory=True, num_workers=6)
+test_loader = DataLoader(test_combined_dataset, batch_size=1, shuffle=False, pin_memory=True, num_workers=6)
 
 total_samples_in_train_loader = len(training_loader.dataset)
 print(f"[INFO] - Total number of samples in train_loader: {total_samples_in_train_loader}")
@@ -588,10 +681,10 @@ best_wd= best_params['WD']
 best_patience = best_params['PATIENCE']
 
 LR = best_lr
-PATIENCE = best_patience
+PATIENCE = 10
 WD = best_wd
 optimizer = AdamW(model.parameters(), lr=LR, weight_decay=WD)
-num_epochs = best_numepochs
+num_epochs = 100
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print(
@@ -710,11 +803,11 @@ with torch.no_grad():
         targets_train.extend(targets_norm.cpu().numpy())
 
     for value in predictions_train:
-        denormalized_value = np.round(denormalize(value[0], 127.0, 53.0), 2)
+        denormalized_value = np.round(denormalize(value[0], max_val, min_val), 2)
         train_denormalized_values_list_pred.append(denormalized_value)
 
     for value in targets_train:
-        denormalized_value = np.round(denormalize(value,127.0, 53.0), 2)
+        denormalized_value = np.round(denormalize(value,max_val, min_val), 2)
         train_denormalized_values_list_target.append(denormalized_value)
 
 
@@ -783,11 +876,11 @@ with torch.no_grad():
         targets_all.extend(targets_norm.cpu().numpy())
 
     for value in predictions:
-        denormalized_value = np.round(denormalize(value[0], 127.0, 53.0), 2)
+        denormalized_value = np.round(denormalize(value[0], max_val, min_val), 2)
         denormalized_values_list_pred.append(denormalized_value)
 
     for value in targets_all:
-        denormalized_value = np.round(denormalize(value,127.0, 53.0), 2)
+        denormalized_value = np.round(denormalize(value,max_val, min_val), 2)
         denormalized_values_list_target.append(denormalized_value)
 
 

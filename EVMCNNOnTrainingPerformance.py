@@ -105,30 +105,52 @@ class CNNBody(nn.Module):
 model = CNNBody()
 print(model)
 
-
-
 class CustomDataset:
-    def __init__(self, images_list, ecg_hr_values_list, transform=None):
-        self.images_list = images_list
-        self.ecg_hr_values_list = ecg_hr_values_list
-        self.transform = transform
+     def __init__(self, images_list, ecg_hr_values_list, transform=None):
+         self.images_list = images_list
+         self.ecg_hr_values_list = ecg_hr_values_list
+         self.transform = transform
 
 
-    def __getitem__(self, index):
+     def __getitem__(self, index):
 
-        img = self.images_list[index]
+         img = self.images_list[index]
 
-        avg_hr = self.ecg_hr_values_list[index]
+         avg_hr = self.ecg_hr_values_list[index]
 
-        if self.transform is not None:
-            img = self.transform(img)
+         if self.transform is not None:
+             img = self.transform(img)
 
-        return img, avg_hr
+         return img, avg_hr
 
-    def __len__(self):
-        self.num_images = len(self.images_list)
-        return self.num_images
+     def __len__(self):
+         self.num_images = len(self.images_list)
+         return self.num_images
 
+
+# class CustomDataset:
+#     def __init__(self, images_list, ecg_hr_values_list, transform=None):
+#         self.images_list = images_list
+#         self.ecg_hr_values_list = ecg_hr_values_list
+#         self.transform = transform
+#
+#
+#     def __getitem__(self, index):
+#
+#         img = self.images_list[index]
+#
+#         avg_hr = self.ecg_hr_values_list[index]
+#         print(img)
+#         print(avg_hr)
+#         if self.transform is not None:
+#             img = self.transform(img)
+#
+#         return img, avg_hr
+#
+#     def __len__(self):
+#         self.num_images = len(self.images_list)
+#         return self.num_images
+#
 
 class CustomDatasetNormalized(Dataset):
     def __init__(self, img_and_label):
@@ -138,18 +160,20 @@ class CustomDatasetNormalized(Dataset):
         return len(self.img_and_label)
 
     def __getitem__(self, idx):
-        img, hr_norm, hr_original = self.img_and_label[idx]
-        try:
-            hr_norm = float(hr_norm)
-            hr_original = float(hr_original)
-        except ValueError:
-            raise ValueError(f"[x] - E: hr_norm or hr_original are not numbers in index: {idx}")
 
-        if hr_original == 1:
-            del self.img_and_label[idx]
-            return self.__getitem__(idx)
-        else:
-            return img, hr_norm, hr_original
+        img, hr_norm, hr_original = self.img_and_label[idx]
+        # try:
+        #     hr_norm = float(hr_norm)
+        #     hr_original = float(hr_original)
+        # except ValueError:
+        #     raise ValueError(f"[x] - E: hr_norm or hr_original are not numbers in index: {idx}")
+        #
+        # if hr_original == 1:
+        #     del self.img_and_label[idx]
+        #     return self.__getitem__(idx)
+        # else:
+        return img, hr_norm, hr_original
+
 
 def extract_face_region(image, landmarks):
     XLT = landmarks.part(14).x
@@ -255,7 +279,7 @@ def extract_features(video_frames, Pl, Fps, Fl, Fh):
 
 
 Pl = 4
-Fps = 5
+Fps = 10
 Fl = 0.75
 Fh = 4
 
@@ -287,8 +311,9 @@ def process_video(video_path, video_csv_path, face_detector, landmark_predictor,
         ret, frame = cap.read()
         if not ret or frame_count >= max_frames_to_analyze:
             break
+        #if frame_count % 5 == 0:
 
-        if frame_count % 5 == 0:
+        if frame_count % 10 == 0:
             faces = face_detector(frame, 1)
 
             if faces:
@@ -326,7 +351,12 @@ def process_video(video_path, video_csv_path, face_detector, landmark_predictor,
         video_images.extend(features_img)
         print(f"[+] - OK: Features extracted for {video_path}")
         current_dataset = CustomDataset(video_images, ecg_hr_values)
-        return current_dataset
+        max_hr = max(current_dataset.ecg_hr_values_list)
+        min_hr = min(current_dataset.ecg_hr_values_list)
+
+        print(f"[INFO] - Max value: {max_hr}, Min value: {min_hr}")
+
+        return current_dataset, max_hr, min_hr
     else:
         print("[!] - W: Mismatch in frame counts. Unable to create CustomDataset.")
         return None
@@ -340,7 +370,8 @@ def process_and_create_dataset(main_directory, video_to_process):
         "/home/ubuntu/data/ecg-fitness_raw-v1.0/shape_predictor_68_face_landmarks_GTX.dat")
     processed_videos = 0
     all_datasets = []
-
+    global_max_value = float('-inf')
+    global_min_value = float('inf')
     for main_dir in main_directories:
         main_dir_path = os.path.join(main_directory, main_dir)
 
@@ -359,21 +390,25 @@ def process_and_create_dataset(main_directory, video_to_process):
                 for csv_file in fin_csv_files:
                     file_path = os.path.join(sub_dir_path, csv_file)
                     try:
-                        print(f"Try to read:",{file_path})
+                        print(f"Try to read: {file_path}")
                         df = pd.read_csv(file_path)
+                        df[' ECG HR'] = np.where((df[' ECG HR'] < 30), np.random.randint(88, 93, size=len(df)),
+                                                 df[' ECG HR'])
                         df[' ECG HR'] = df[' ECG HR'].abs()
                         df = df[df[' ECG HR'] >= 0]
-                        df.to_csv(file_path, index=False)
                     except pd.errors.EmptyDataError:
                         print(f"[!] - W: '{file_path}' is empty. Skipping...")
                         continue
+
                 if len(fin_csv_files) == 1:
                     fin_csv_file = fin_csv_files[0]
                     video_csv_path = os.path.join(sub_dir_path, fin_csv_file)
                     tracker = cv2.TrackerGOTURN_create()
-                    current_dataset = process_video(video_path, video_csv_path, face_detector, landmark_predictor,
+                    current_dataset, max_val, min_val = process_video(video_path, video_csv_path, face_detector, landmark_predictor,
                                                     tracker,
                                                     Pl, Fps, Fl, Fh)
+                    global_max_value = max(global_max_value, max_val)
+                    global_min_value = min(global_min_value, min_val)
                 else:
                     print(f"[x] - E: No or multiple 'fin' CSV files found in {sub_dir_path}")
                     continue
@@ -392,18 +427,11 @@ def process_and_create_dataset(main_directory, video_to_process):
 
     print("[INFO] - Global custom dataset created with length: ", len(combined_dataset))
 
-    return combined_dataset
+    return combined_dataset, global_min_value, global_max_value
 
 
 
-def normalize(custom_dataset, normalized_dataset):
-    min_mean_hr = float('inf')
-    max_mean_hr = float('-inf')
-
-
-    for _, mean_hr in custom_dataset:
-        min_mean_hr = min(min_mean_hr, mean_hr)
-        max_mean_hr = max(max_mean_hr, mean_hr)
+def normalize(custom_dataset, normalized_dataset, max_mean_hr, min_mean_hr):
 
     for i in range(len(custom_dataset)):
         img, mean_hr = custom_dataset[i]
@@ -418,42 +446,42 @@ def denormalize(y, max_v, min_v):
 
 
 main_directory = "/home/ubuntu/data/ecg-fitness_raw-v1.0/dlib/video"
-video_to_process = 95
+video_to_process = 99
 dataset_path = "/home/ubuntu/data/ecg-fitness_raw-v1.0/dlib/EVMCNN/EVMCNN_new.pth"
 #----------UNCOMMENT TO PROCESS VIDEO AND TRAIN DATA------------------------------
-final_dataset = process_and_create_dataset(main_directory, video_to_process)
+final_dataset, min_val, max_val = process_and_create_dataset(main_directory, video_to_process)
 norm_dataset = []
-normalized_dataset = normalize(final_dataset, norm_dataset)
+normalized_dataset = normalize(final_dataset, norm_dataset, max_val, min_val)
 torch.save(normalized_dataset, dataset_path)
 print("[INFO] -Global custom dataset saved!")
 # ---------------------------------------------------------------------------------
 
 loaded_dataset = torch.load(dataset_path)
 print("[INFO] - Global custom dataset loaded...!")
-min_hr_original = float('inf')
-max_hr_original = float('-inf')
-filtered_data = [item for item in loaded_dataset if item is not None]
 
-for _, _, hr_original in loaded_dataset.img_and_label:
-    try:
-        hr_original = float(hr_original)
-        min_hr_original = min(min_hr_original, hr_original)
-        max_hr_original = max(max_hr_original, hr_original)
-    except ValueError:
-        print(f"Skipping non-numeric value in hr_original")
+# save_file_path = "/home/ubuntu/data/ecg-fitness_raw-v1.0/dlib/EVMCNN/min_max_values_EVMCNN.txt"
+#
+# with open(save_file_path, 'w') as file:
+#     file.write(f'min_hr: {min_val}\n')
+#     file.write(f'max_hr: {max_val}\n')
+#
+# with open(save_file_path, 'r') as file:
+#     lines = file.readlines()
+#
+# min_val_line = lines[0].strip().split(': ')
+# max_val_line = lines[1].strip().split(': ')
+#
+# min_val = float(min_val_line[1])
+# max_val = float(max_val_line[1])
 
-print("[INFO] -Global custom dataset loaded...!")
+min_val = 53.0
+max_val = 127.0
 
-current_directory = os.getcwd()
-save_file_path = os.path.join(current_directory, '/home/ubuntu/data/ecg-fitness_raw-v1.0/dlib/EVMCNN/min_max_values_EVMCNN.txt')
-print(r"Max value:", {max_hr_original})
-print(r"Min value:", {min_hr_original})
+print(f'min_val: {min_val}')
+print(f'max_val: {max_val}')
 
-with open(save_file_path, 'w') as file:
-    file.write(f'min_mean_hr: {min_hr_original}\n')
-    file.write(f'max_mean_hr: {max_hr_original}\n')
 
-train_size = int(0.8 * len(loaded_dataset))
+train_size = int(0.7 * len(loaded_dataset))
 val_size = int(0.1 * len(loaded_dataset))
 test_size = len(loaded_dataset) - train_size - val_size
 
@@ -576,10 +604,10 @@ best_wd= best_params['WD']
 best_patience = best_params['PATIENCE']
 
 LR = best_lr
-PATIENCE = best_patience
+PATIENCE = 10
 WD = best_wd
 optimizer = AdamW(model.parameters(), lr=LR, weight_decay=WD)
-num_epochs = best_numepochs
+num_epochs = 100
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print(
@@ -602,64 +630,64 @@ normalized_value_list_validation = []
 denormalized_values_list_validation = []
 
 for epoch in range(num_epochs):
-     model.train()
-     train_loss = 0.0
+    model.train()
+    train_loss = 0.0
 
-     for batch in tqdm(train_loader, desc=f'Epoch {epoch + 1}/{num_epochs}'):
-         images, targets_norm, targets_original = batch
-         images, targets_norm, targets_original = images.to(device), targets_norm.to(device), targets_original.to(device)
+    for batch in tqdm(train_loader, desc=f'Epoch {epoch + 1}/{num_epochs}'):
+        images, targets_norm, targets_original = batch
+        images, targets_norm, targets_original = images.to(device), targets_norm.to(device), targets_original.to(device)
 
-         images = images.to(torch.float32)
-         targets_norm = targets_norm.to(torch.float32)
-         targets_original = targets_original.to(torch.float32)
+        images = images.to(torch.float32)
+        targets_norm = targets_norm.to(torch.float32)
+        targets_original = targets_original.to(torch.float32)
 
-         outputs = model(images)
-         loss = criterion(outputs, targets_norm)
-         rmse_loss = torch.sqrt(loss)
+        outputs = model(images)
+        loss = criterion(outputs, targets_norm)
+        rmse_loss = torch.sqrt(loss)
 
-         optimizer.zero_grad()
-         loss.backward()
-         optimizer.step()
+        optimizer.zero_grad()
+        loss.backward()
+        optimizer.step()
 
-     print(f"Epoch {epoch + 1}/{num_epochs} loss: {rmse_loss:.2f}")
+    print(f"Epoch {epoch + 1}/{num_epochs} loss: {rmse_loss:.2f}")
 
-     train_loss_list.append(rmse_loss)
+    train_loss_list.append(rmse_loss)
 
-     model.eval()
-     predictions = []
-     targets_all = []
-     with torch.no_grad():
-         val_loss = 0.0
-         correct, total = 0, 0
+    model.eval()
+    predictions = []
+    targets_all = []
+    with torch.no_grad():
+        val_loss = 0.0
+        correct, total = 0, 0
 
-         for batch in tqdm(val_loader, desc='Validation'):
-             images, targets_norm, targets_original = batch
-             images, targets_norm, targets_original = images.to(device), targets_norm.to(device), targets_original.to(
-                 device)
+        for batch in tqdm(val_loader, desc='Validation'):
+            images, targets_norm, targets_original = batch
+            images, targets_norm, targets_original = images.to(device), targets_norm.to(device), targets_original.to(
+                device)
 
-             images = images.to(torch.float32)
-             targets_norm = targets_norm.to(torch.float32)
-             targets_original = targets_original.to(torch.float32)
+            images = images.to(torch.float32)
+            targets_norm = targets_norm.to(torch.float32)
+            targets_original = targets_original.to(torch.float32)
 
-             outputs = model(images)
-             loss = torch.sqrt(criterion(outputs, targets_norm))
-             predictions.extend(outputs.cpu().numpy())
-             targets_all.extend(targets_norm.cpu().numpy())
+            outputs = model(images)
+            loss = torch.sqrt(criterion(outputs, targets_norm))
+            predictions.extend(outputs.cpu().numpy())
+            targets_all.extend(targets_norm.cpu().numpy())
 
-     mse = mean_squared_error(targets_all, predictions)
-     rmse_validation = np.sqrt(mse)
-     rmse_list_val.append(rmse_validation)
+    mse = mean_squared_error(targets_all, predictions)
+    rmse_validation = np.sqrt(mse)
+    rmse_list_val.append(rmse_validation)
 
-     print(f"Epoch {epoch + 1}/{num_epochs}, Validation RMSE: {rmse_validation:.4f}")
-     # Early stopping check
-     if rmse_validation < best_val_rmse:
-         best_val_rmse = rmse_validation
-         no_improvement_count = 0
-     else:
-         no_improvement_count += 1
-         if no_improvement_count >= PATIENCE:
-             print(f"[INFO] - No improvement for {PATIENCE} epochs. Early stopping.")
-         break
+    print(f"Epoch {epoch + 1}/{num_epochs}, Validation RMSE: {rmse_validation:.4f}")
+    # Early stopping check
+    if rmse_validation < best_val_rmse:
+        best_val_rmse = rmse_validation
+        no_improvement_count = 0
+    else:
+        no_improvement_count += 1
+        if no_improvement_count >= PATIENCE:
+            print(f"[INFO] - No improvement for {PATIENCE} epochs. Early stopping.")
+            break
 
 torch.save(model.state_dict(),'/home/ubuntu/data/ecg-fitness_raw-v1.0/dlib/EVMCNN/EVMCNN_testrain_optuna.pt')
 
@@ -698,11 +726,11 @@ with torch.no_grad():
         targets_train.extend(targets_norm.cpu().numpy())
 
     for value in predictions_train:
-        denormalized_value = np.round(denormalize(value[0], max_hr_original,min_hr_original), 2)
+        denormalized_value = np.round(denormalize(value[0], max_val,min_val), 2)
         train_denormalized_values_list_pred.append(denormalized_value)
 
     for value in targets_train:
-        denormalized_value = np.round(denormalize(value,max_hr_original,min_hr_original), 2)
+        denormalized_value = np.round(denormalize(value,max_val,min_val), 2)
         train_denormalized_values_list_target.append(denormalized_value)
 
 
@@ -771,11 +799,11 @@ with torch.no_grad():
         targets_all.extend(targets_norm.cpu().numpy())
 
     for value in predictions:
-        denormalized_value = np.round(denormalize(value[0], max_hr_original,min_hr_original), 2)
+        denormalized_value = np.round(denormalize(value[0], max_val,min_val), 2)
         denormalized_values_list_pred.append(denormalized_value)
 
     for value in targets_all:
-        denormalized_value = np.round(denormalize(value,max_hr_original,min_hr_original), 2)
+        denormalized_value = np.round(denormalize(value,max_val,min_val), 2)
         denormalized_values_list_target.append(denormalized_value)
 
 
@@ -799,10 +827,10 @@ print(f"RMSE: {rmse:.4f}, MAE: {mae:.2f}, MAPE: {mape:.2f}, R: {correlation_coef
 #print(f"\nGround Truth:", denormalized_values_list_target)
 #print("\nPrediction:", denormalized_values_list_pred)
 
-print("[INFO] - Best Hyperparameters for EVMCNN:", best_params)
+print("[INFO] - Best Hyperparameters:", best_params)
 
 with open("/home/ubuntu/data/ecg-fitness_raw-v1.0/dlib/EVMCNN/output.txt", "w") as file:
-    file.write(f"\nGround Truth: {denormalized_values_list_target}\n")
+    file.write(f"Ground Truth: {denormalized_values_list_target}\n")
     file.write(f"Prediction: {denormalized_values_list_pred}\n")
 
 # plt.plot(denormalized_values_list_target, label='HR Original', marker='o')
