@@ -522,7 +522,7 @@ for _, _, hr_original in loaded_dataset.img_and_label:
 print("[INFO] -Global custom dataset loaded...!")
 
 current_directory = os.getcwd()
-save_file_path = os.path.join(current_directory, 'min_max_values_vit.txt')
+save_file_path = os.path.join(current_directory, '../min_max_values_vit.txt')
 print(r"Max value:", {max_hr_original})
 print(r"Min value:", {min_hr_original})
 
