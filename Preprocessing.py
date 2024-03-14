@@ -1,14 +1,64 @@
+import re
+import pandas as pd
+import neurokit2 as nk
+import matplotlib.pyplot as plt
+import torch
+from facenet_pytorch import *
+import csv
 import os
-import cv2
-import dlib
 import numpy as np
-from tqdm import tqdm
-from datetime import datetime
-from decimal import *
+import cv2
+import scipy as sy
+from torch import nn
+from torchvision import models
+import torchvision
+from torch.nn import functional as F
+import torchvision.models
+from torchvision.models.resnet import ResNet34_Weights
+import cv2
+import torch
+import torchvision.transforms as transforms
+from torch.autograd import Variable
+from PIL import Image, ImageFilter
+import time
+import sys
+import ssl
+import numpy as np
+import tensorflow as tf
+import random
+from scipy import ndarray
+import skimage as sk
+from skimage import transform
+from skimage import util
+import cv2
+import sys
+import numpy as np
+import matplotlib.pyplot as plt
+from scipy import signal
+from sklearn.decomposition import FastICA
+from sklearn.decomposition import PCA
+import random
+import pandas as pd
+import pandas as pd
+import numpy as np
+from sklearn.decomposition import PCA
+from sklearn.preprocessing import StandardScaler
+from sklearn.model_selection import train_test_split
+from torch.utils.data import TensorDataset, DataLoader
+import torch
+import matplotlib.pyplot as plt
+from imblearn.over_sampling import RandomOverSampler
+import seaborn as sns
+from hyperopt import fmin, tpe, hp
+import torch.optim as optim
+import torch.nn as nn
+from torch.utils.data import DataLoader
+from sklearn.metrics import mean_squared_error, r2_score
+import math
+import captum.attr as captum
+import numpy as np
+plt.rcParams['figure.max_open_warning'] = 100
 
-
-
-"""# DATA PREPROCESSING, UNIONE DEI DATI FISIOLIGICI E FACCIALI + ESTRAZIONE FEATURE DA LANDMARK FACCIALI PER HR ESTIMATION (REGRESSION)"""
 
 def process_ecg_data_all(main_directory,fps=30):
     # Crea una lista per memorizzare i dati della seconda colonna di tutti i file CSV
@@ -57,6 +107,14 @@ def process_ecg_data_all(main_directory,fps=30):
                     folder_name = os.path.basename(root)
                     ecg_60_seconds_file = os.path.join(root, f"ecg_60_seconds_{folder_name}.csv")
                     sampled_ecg_data.to_csv(ecg_60_seconds_file, index=False)
+
+
+import os
+import cv2
+import dlib
+import csv
+from tqdm import tqdm
+
 
 
 def create_or_recreate_file(features_file_path, feature_names):
@@ -305,6 +363,11 @@ def calculate_power_spectrum(intensity_forehead, intensity_lips, intensity_cheek
     return (frequencies_forehead, power_spectrum_forehead), (frequencies_lips, power_spectrum_lips), (frequencies_cheeks, power_spectrum_cheeks)
 
 
+
+
+import os
+from datetime import datetime
+
 def delete_old_files(main_directory):
     # Ottieni la data corrente
     current_date = datetime.now().date()
@@ -331,10 +394,14 @@ def delete_old_files(main_directory):
                     print(f"Errore durante la verifica del file {file}: {str(e)}")
 
 
+
+
+from decimal import *
+
 def extract_facial_features_all(main_directory):
     # Inizializza il rilevatore di volti e il predittore delle landmark facciali
-    face_detector = dlib.cnn_face_detection_model_v1('/home/ubuntu/ecg-fitness_raw-v1.0/mmod_human_face_detector.dat')  # Modello CNN per il rilevamento dei volti (compatibile con GPU)
-    landmark_predictor = dlib.shape_predictor('/home/ubuntu/ecg-fitness_raw-v1.0/shape_predictor_68_face_landmarks_GTX.dat')  # Assicurati di fornire il percorso corretto al file dei landmark
+    face_detector = dlib.cnn_face_detection_model_v1('/content/drive/MyDrive/Thesis <BELLIZZI>/ecg-fitness_raw-v1.0/mmod_human_face_detector.dat')  # Modello CNN per il rilevamento dei volti (compatibile con GPU)
+    landmark_predictor = dlib.shape_predictor('/content/drive/MyDrive/Thesis <BELLIZZI>/ecg-fitness_raw-v1.0/shape_predictor_68_face_landmarks_GTX.dat')  # Assicurati di fornire il percorso corretto al file dei landmark
 
     # Itera su tutte le cartelle principali
     for root, dirs, files in os.walk(main_directory):
@@ -441,6 +508,10 @@ def extract_facial_features_all(main_directory):
                 # Chiudi il video
                 video_capture.release()
 
+
+
+
+
 def merge_csv_files(main_directory, output_csv_filename):
     all_data = []  # Lista in cui verranno memorizzati i dati dai file CSV
     header = None  # Inizializza l'header come None
@@ -469,6 +540,7 @@ def merge_csv_files(main_directory, output_csv_filename):
     else:
         print("Nessun file CSV trovato nelle sotto-cartelle.")
 
+
 def merge_ecg_and_facial_features_landmarks(main_directory):
     # Itera su tutte le sottocartelle delle 16 cartelle principali
     for root, dirs, files in os.walk(main_directory):
@@ -492,75 +564,14 @@ def merge_ecg_and_facial_features_landmarks(main_directory):
                 merged_df.to_csv(final_csv, index=False)
 
 
-main_directory = '/home/ubuntu/ecg-fitness_raw-v1.0'
+
+main_directory = '/content/drive/MyDrive/Thesis <BELLIZZI>/ecg-fitness_raw-v1.0'
 process_ecg_data_all(main_directory)
 delete_old_files(main_directory)
 extract_facial_features_all(main_directory)
 merge_ecg_and_facial_features_landmarks(main_directory)
 merge_csv_files(main_directory, "dataset.csv")
 
-
-csv_file = "/home/ubuntu/dataset.csv"  # Sostituisci con il percorso del tuo file CSV
-df = pd.read_csv(csv_file)
-
-# Conta il numero totale di righe escludendo l'header
-num_total_rows = len(df)
-
-# Estrai la colonna HR (assicurati che il nome della colonna sia corretto)
-hr_column = " ECG HR"  # Sostituisci con il nome effettivo della colonna HR
-
-# Crea un DataFrame contenente solo la colonna HR
-hr_df = df[[hr_column]]
-
-# Conta i valori univoci nella colonna HR
-unique_hr_values = hr_df[hr_column].unique()
-num_unique_hr_values = len(unique_hr_values)
-
-print(f"Numero totale di righe nel CSV (escludendo l'header): {num_total_rows}")
-print(f"Numero totale di valori univoci in HR: {num_unique_hr_values}")
-
-del df
-
-# Conta il numero totale di righe escludendo l'header
-num_total_rows = len(df)
-
-# Estrai la colonna HR (assicurati che il nome della colonna sia corretto)
-hr_column = " ECG HR"  # Sostituisci con il nome effettivo della colonna HR
-
-# Crea un DataFrame contenente solo la colonna HR
-hr_df = df[[hr_column]]
-
-# Conta i valori univoci nella colonna HR
-unique_hr_values = hr_df[hr_column].unique()
-num_unique_hr_values = len(unique_hr_values)
-
-print(f"Numero totale di righe nel CSV (escludendo l'header): {num_total_rows}")
-print(f"Numero totale di valori univoci in HR: {num_unique_hr_values}")
-# Rimuovi le righe in cui i valori della colonna "ECG HR" sono minori di 0
-df = df[df[hr_column] >= 0]
-
-# Ora puoi stampare di nuovo il numero totale di righe nel DataFrame
-num_rows_after_removal = len(df)
-print(f"Numero totale di righe nel DataFrame dopo la rimozione: {num_rows_after_removal}")
-
-# Crea un DataFrame contenente solo la colonna HR
-hr_df = df[[hr_column]]
-
-# Rimuovi i valori negativi dalla colonna HR nel DataFrame hr_df
-hr_df = hr_df[hr_df[hr_column] >= 0]
-
-# Stampa il numero di valori univoci nella colonna HR dopo la rimozione dei valori negativi
-unique_hr_values_after_removal = hr_df[hr_column].unique()
-num_unique_hr_values_after_removal = len(unique_hr_values_after_removal)
-
-print(f"Numero totale di valori univoci in HR dopo la rimozione dei valori negativi: {num_unique_hr_values_after_removal}")
-
-# Salva il DataFrame modificato in un nuovo file CSV
-new_csv_file = "/content/drive/MyDrive/Thesis <BELLIZZI>/ecg-fitness_raw-v1.0/dataset_cleaned.csv"
-df.to_csv(new_csv_file, index=False)
-
-# Puoi anche stampare il percorso del nuovo file CSV
-print(f"DataFrame salvato in: {new_csv_file}")
 
 for root, dirs, files in os.walk(main_directory):
     for file in files:
@@ -578,36 +589,6 @@ for root, dirs, files in os.walk(main_directory):
             df.to_csv(file_path, index=False)
 
             print(f"File {file} aggiornato con successo.")
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 
