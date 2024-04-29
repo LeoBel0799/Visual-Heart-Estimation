@@ -105,7 +105,7 @@ def predict2():
         video_file = request.files['file']
 
         # Save the uploaded video in the local directory
-        video_path = 'uploaded_video.mp4'
+        video_path = r'C:\Users\user\Desktop\uploaded_video.mp4'
         video_file.save(video_path)
 
         # Save the uploaded video in the database
@@ -121,10 +121,18 @@ def predict2():
         width = int(video_capture.get(cv2.CAP_PROP_FRAME_WIDTH))
         height = int(video_capture.get(cv2.CAP_PROP_FRAME_HEIGHT))
 
+        video_counter = 1
+        output_video_path = f'uploaded_video_{video_counter}.mp4'
+
+        # Check if the output video file already exists, increment the counter if needed
+        while os.path.exists(output_video_path):
+            video_counter += 1
+            output_video_path = f'uploaded_video_{video_counter}.mp4'
+
         # Define codec and create a VideoWriter object
         fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-        output_video_path = 'output_video.mp4'
         video_writer = cv2.VideoWriter(output_video_path, fourcc, fps, (width, height))
+
 
         # Process each frame in the video
         frame_count = 0
@@ -171,8 +179,8 @@ def predict2():
                 break
 
             # Display results every 10 seconds
-            if frame_count % (fps * 5) == 0:
-                print(f'Prediction at frame {frame_count}: {original_prediction}')
+            # if frame_count % (fps * 5) == 0:
+            #     print(f'Prediction at frame {frame_count}: {original_prediction}')
 
             # Release resources and destroy window if 'q' key is pressed
             if cv2.waitKey(1) & 0xFF == ord('q'):
@@ -318,8 +326,8 @@ def predict():
         # Define the delay between frames in milliseconds (increase for slower playback)
         delay_between_frames = 50  # 50 milliseconds delay between frames
 
-        # Set the end time for prediction (30 seconds)
-        end_time = cv2.getTickCount() + int(30 * cv2.getTickFrequency())
+        # Set the end time for prediction (60 seconds)
+        end_time = cv2.getTickCount() + int(60 * cv2.getTickFrequency())
 
         # Process frames from the webcam
         while cv2.waitKey(1) & 0xFF != ord('q'):  # Press 'q' to exit
